@@ -39,7 +39,8 @@
 - **跳转底部** — 加载全部消息并直达最后一条
 
  <img width="1277" height="798" alt="image" src="https://github.com/user-attachments/assets/c56cab9a-131b-4a3f-bb21-773c24e2d99d" />
- ![Uploading image.png…]()
+<img width="1274" height="804" alt="image" src="https://github.com/user-attachments/assets/205561f2-7fae-467f-9da9-99e7a0aae577" />
+<img width="1280" height="799" alt="image" src="https://github.com/user-attachments/assets/2d4338ce-d6ac-4937-8c7e-003b68c5e9e9" />
 
 
 
