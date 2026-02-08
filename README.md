@@ -24,7 +24,7 @@
 
 一个轻量级桌面应用，支持同时浏览 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [Codex](https://github.com/openai/codex) 的本地会话记录。左上角一键切换工具，查看不同工具的项目、会话、消息、搜索和使用统计。
 
-> 本项目参照 大鹅群（qq:914736421）[zuoliangyu](https://github.com/zuoliangyu) 的 想法和创意。
+> 本项目参照 大鹅群（qq:914736421）[zuoliangyu]的 想法和创意。
 
 ## Features
 
@@ -115,9 +115,6 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-## Credits
-
-- 原始项目 [claude-memory-viewer](https://github.com/zuoliangyu/claude-memory-viewer) 和 codex-session-viewer 由 [zuoliangyu](https://github.com/zuoliangyu) 开发
 
 ## License
 
