@@ -1,4 +1,4 @@
-# Session Viewer
+<img width="1277" height="798" alt="image" src="https://github.com/user-attachments/assets/c56cab9a-131b-4a3f-bb21-773c24e2d99d" /># Session Viewer
 
 <p align="center">
   <img src="src-tauri/icons/icon.png" width="128" height="128" alt="Session Viewer">
@@ -37,6 +37,9 @@
 - **使用统计** — 每日活动图表、Token 用量趋势、模型分布
 - **实时更新** — 文件系统监听，新会话自动刷新
 - **跳转底部** — 加载全部消息并直达最后一条
+
+  <img width="1277" height="798" alt="image" src="https://github.com/user-attachments/assets/82416702-b7bb-47e0-89c6-7e5a1b7fefb4" />
+
 
 ## Data Source
 
