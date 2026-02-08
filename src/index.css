@@ -43,6 +43,90 @@
     --input: 215 27.9% 16.9%;
     --ring: 216 12.2% 83.9%;
   }
+
+  /* Nord */
+  .theme-nord {
+    --background: 220 16% 22%;
+    --foreground: 219 28% 88%;
+    --card: 220 17% 20%;
+    --card-foreground: 219 28% 88%;
+    --primary: 193 43% 67%;
+    --primary-foreground: 220 16% 16%;
+    --secondary: 220 16% 28%;
+    --secondary-foreground: 219 28% 88%;
+    --muted: 220 16% 28%;
+    --muted-foreground: 219 14% 58%;
+    --accent: 220 16% 28%;
+    --accent-foreground: 219 28% 88%;
+    --destructive: 354 42% 56%;
+    --destructive-foreground: 219 28% 88%;
+    --border: 220 16% 28%;
+    --input: 220 16% 28%;
+    --ring: 193 43% 67%;
+  }
+
+  /* Dracula */
+  .theme-dracula {
+    --background: 231 15% 18%;
+    --foreground: 60 30% 96%;
+    --card: 232 14% 15%;
+    --card-foreground: 60 30% 96%;
+    --primary: 265 89% 78%;
+    --primary-foreground: 231 15% 18%;
+    --secondary: 232 14% 25%;
+    --secondary-foreground: 60 30% 96%;
+    --muted: 232 14% 25%;
+    --muted-foreground: 228 8% 56%;
+    --accent: 232 14% 25%;
+    --accent-foreground: 60 30% 96%;
+    --destructive: 0 100% 67%;
+    --destructive-foreground: 60 30% 96%;
+    --border: 232 14% 25%;
+    --input: 232 14% 25%;
+    --ring: 265 89% 78%;
+  }
+
+  /* Monokai */
+  .theme-monokai {
+    --background: 70 8% 15%;
+    --foreground: 60 17% 89%;
+    --card: 70 8% 12%;
+    --card-foreground: 60 17% 89%;
+    --primary: 80 76% 53%;
+    --primary-foreground: 70 8% 12%;
+    --secondary: 70 8% 22%;
+    --secondary-foreground: 60 17% 89%;
+    --muted: 70 8% 22%;
+    --muted-foreground: 60 7% 55%;
+    --accent: 70 8% 22%;
+    --accent-foreground: 60 17% 89%;
+    --destructive: 0 86% 62%;
+    --destructive-foreground: 60 17% 89%;
+    --border: 70 8% 22%;
+    --input: 70 8% 22%;
+    --ring: 80 76% 53%;
+  }
+
+  /* Solarized Light */
+  .theme-solarized-light {
+    --background: 44 87% 94%;
+    --foreground: 192 81% 14%;
+    --card: 44 87% 94%;
+    --card-foreground: 192 81% 14%;
+    --primary: 205 69% 49%;
+    --primary-foreground: 44 87% 94%;
+    --secondary: 46 42% 88%;
+    --secondary-foreground: 192 81% 14%;
+    --muted: 46 42% 88%;
+    --muted-foreground: 195 23% 43%;
+    --accent: 46 42% 88%;
+    --accent-foreground: 192 81% 14%;
+    --destructive: 1 71% 52%;
+    --destructive-foreground: 44 87% 94%;
+    --border: 46 42% 84%;
+    --input: 46 42% 84%;
+    --ring: 205 69% 49%;
+  }
 }
 
 @layer base {

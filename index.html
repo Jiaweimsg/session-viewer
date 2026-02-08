@@ -5,6 +5,16 @@
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Session Viewer</title>
+    <script>
+      // Restore theme before render to prevent flash
+      (function() {
+        var t = localStorage.getItem("theme") || "dark";
+        var darkThemes = ["dark", "nord", "dracula", "monokai"];
+        var cls = darkThemes.includes(t) ? "dark" : "";
+        if (t !== "dark" && t !== "light") cls += " theme-" + t;
+        document.documentElement.className = cls.trim();
+      })();
+    </script>
   </head>
   <body class="bg-background text-foreground">
     <div id="root"></div>

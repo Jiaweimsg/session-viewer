@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAppStore } from "../../stores/appStore";
 import type { ToolType } from "../../types";
@@ -8,13 +8,17 @@ import {
   BarChart3,
   ChevronRight,
   MessageSquare,
+  Palette,
+  RefreshCw,
 } from "lucide-react";
+import { ThemePicker } from "./ThemePicker";
 
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { activeTool, setActiveTool, projects, loadProjects, projectsLoading } =
     useAppStore();
+  const [showThemePicker, setShowThemePicker] = useState(false);
 
   useEffect(() => {
     loadProjects();
@@ -106,9 +110,19 @@ export function Sidebar() {
 
         {/* Projects list */}
         <div>
-          <h2 className="px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            项目 ({projects.length})
-          </h2>
+          <div className="flex items-center justify-between px-3 py-1">
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              项目 ({projects.length})
+            </h2>
+            <button
+              onClick={() => loadProjects()}
+              disabled={projectsLoading}
+              className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              title="刷新项目列表"
+            >
+              <RefreshCw className={`w-3 h-3 ${projectsLoading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
           {projectsLoading ? (
             <div className="px-3 py-2 text-sm text-muted-foreground">
               加载中...
@@ -147,8 +161,18 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="p-3 border-t border-border text-xs text-muted-foreground">
-        {projects.length} 个项目
+      <div className="relative p-3 border-t border-border text-xs text-muted-foreground flex items-center justify-between">
+        <span>{projects.length} 个项目</span>
+        <button
+          onClick={() => setShowThemePicker(!showThemePicker)}
+          className="p-1 rounded hover:bg-accent transition-colors"
+          title="切换主题"
+        >
+          <Palette className="w-4 h-4" />
+        </button>
+        {showThemePicker && (
+          <ThemePicker onClose={() => setShowThemePicker(false)} />
+        )}
       </div>
     </aside>
   );
