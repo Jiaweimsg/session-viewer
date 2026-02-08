@@ -7,7 +7,6 @@ import {
   Search,
   BarChart3,
   ChevronRight,
-  MessageSquare,
   Palette,
   RefreshCw,
 } from "lucide-react";
@@ -52,7 +51,7 @@ export function Sidebar() {
       {/* Header */}
       <div className="p-4 border-b border-border">
         <h1 className="text-sm font-semibold text-foreground flex items-center gap-2">
-          <MessageSquare className="w-4 h-4 text-primary" />
+          <img src="/logo.png" alt="Session Viewer" className="w-5 h-5 rounded" />
           Session Viewer
         </h1>
         {/* Tool switcher */}
