@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAppStore } from "../../stores/appStore";
 import {
@@ -7,6 +7,8 @@ import {
   Clock,
   GitBranch,
   Play,
+  Copy,
+  Check,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { zhCN } from "date-fns/locale";
@@ -22,6 +24,8 @@ export function SessionsPage() {
     selectProject,
     projects,
   } = useAppStore();
+
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const project =
     activeTool === "codex"
@@ -49,6 +53,23 @@ export function SessionsPage() {
     } catch (err) {
       console.error("Failed to resume session:", err);
     }
+  };
+
+  const handleCopy = (e: React.MouseEvent, session: any) => {
+    e.stopPropagation();
+    const workDir =
+      activeTool === "codex"
+        ? session.cwd
+        : session.projectPath || project?.displayPath || null;
+    if (!workDir) return;
+    const cmd =
+      activeTool === "codex"
+        ? `cd '${workDir}' && codex resume ${session.sessionId}`
+        : `cd '${workDir}' && claude --resume ${session.sessionId}`;
+    navigator.clipboard.writeText(cmd).then(() => {
+      setCopiedId(session.sessionId);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
   };
 
   const getSessionNavKey = (session: any): string => {
@@ -142,14 +163,30 @@ export function SessionsPage() {
                     )}
                   </div>
                 </div>
-                <button
-                  onClick={(e) => handleResume(e, session)}
-                  className="shrink-0 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-primary/90 flex items-center gap-1"
-                  title="在终端中恢复此会话"
+                <div
+                  className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <Play className="w-3 h-3" />
-                  Resume
-                </button>
+                  <button
+                    onClick={(e) => handleResume(e, session)}
+                    className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-1"
+                    title="在终端中恢复此会话"
+                  >
+                    <Play className="w-3 h-3" />
+                    Resume
+                  </button>
+                  <button
+                    onClick={(e) => handleCopy(e, session)}
+                    className="px-2 py-1.5 text-xs bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 flex items-center gap-1"
+                    title="复制恢复命令到剪贴板"
+                  >
+                    {copiedId === session.sessionId ? (
+                      <Check className="w-3 h-3 text-green-500" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           ))}
