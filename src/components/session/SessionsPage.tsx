@@ -13,6 +13,8 @@ import {
 import { formatDistanceToNow, format } from "date-fns";
 import { zhCN } from "date-fns/locale";
 import { resumeSession } from "../../services/tauriApi";
+import { OpencodeSessionList } from "./OpencodeSessionList";
+import type { OpencodeSessionGroup } from "../../types";
 
 export function SessionsPage() {
   const { projectKey } = useParams<{ tool: string; projectKey: string }>();
@@ -79,6 +81,9 @@ export function SessionsPage() {
     return session.sessionId;
   };
 
+  // Check if sessions data is grouped (for OpenCode)
+  const isGroupedData = sessions.length > 0 && sessions[0].rootSession !== undefined;
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -106,7 +111,15 @@ export function SessionsPage() {
         <div className="text-muted-foreground">加载会话列表...</div>
       ) : sessions.length === 0 ? (
         <div className="text-muted-foreground">此项目没有会话记录。</div>
+      ) : isGroupedData ? (
+        // OpenCode grouped sessions
+        <OpencodeSessionList
+          groups={sessions as OpencodeSessionGroup[]}
+          projectKey={projectKey!}
+          activeTool={activeTool}
+        />
       ) : (
+        // Regular flat sessions list (Claude, Codex)
         <div className="space-y-2">
           {sessions.map((session) => (
             <div

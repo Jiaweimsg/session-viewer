@@ -46,7 +46,7 @@ export function StatsPage() {
     );
   }
 
-  if (activeTool === "codex") {
+  if (activeTool === "codex" || activeTool === "opencode") {
     return <CodexStats stats={stats as CodexTokenSummary} />;
   }
 
@@ -104,12 +104,12 @@ function ClaudeStats({
 
   const modelBreakdown = tokenSummary
     ? Object.entries(tokenSummary.tokensByModel)
-        .sort(([, a], [, b]) => b - a)
-        .map(([model, tokens]) => ({
-          model: model.replace("claude-", "").replace(/-\d+$/, ""),
-          tokens,
-          pct: ((tokens / tokenSummary.totalTokens) * 100).toFixed(1),
-        }))
+      .sort(([, a], [, b]) => b - a)
+      .map(([model, tokens]) => ({
+        model: model.replace("claude-", "").replace(/-\d+$/, ""),
+        tokens,
+        pct: ((tokens / tokenSummary.totalTokens) * 100).toFixed(1),
+      }))
     : [];
 
   return (

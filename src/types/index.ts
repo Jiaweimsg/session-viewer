@@ -1,5 +1,5 @@
 // Tool type discriminator
-export type ToolType = "claude" | "codex";
+export type ToolType = "claude" | "codex" | "opencode";
 
 // ============ Projects ============
 
@@ -17,6 +17,14 @@ export interface CodexProject {
   sessionCount: number;
   lastModified: string | null;
   modelProvider: string | null;
+}
+
+export interface OpencodeProject {
+  id: string;
+  worktree: string;
+  shortName: string;
+  sessionCount: number;
+  lastModified: string | null;
 }
 
 // ============ Sessions ============
@@ -49,6 +57,26 @@ export interface CodexSession {
   filePath: string;
 }
 
+export interface OpencodeSession {
+  sessionId: string;
+  projectId: string;
+  directory: string;
+  shortName: string;
+  title: string | null;
+  slug: string | null;
+  firstPrompt: string | null;
+  messageCount: number;
+  created: string | null;
+  modified: string | null;
+  gitBranch: string | null;
+  parentId: string | null;  // 添加 parentId 字段
+}
+
+export interface OpencodeSessionGroup {
+  rootSession: OpencodeSession;
+  subSessions: OpencodeSession[];
+}
+
 // ============ Messages (unified) ============
 
 export type DisplayContentBlock =
@@ -56,18 +84,18 @@ export type DisplayContentBlock =
   | { type: "thinking"; thinking: string }
   | { type: "tool_use"; id: string; name: string; input: string }
   | {
-      type: "tool_result";
-      toolUseId: string;
-      content: string;
-      isError: boolean;
-    }
+    type: "tool_result";
+    toolUseId: string;
+    content: string;
+    isError: boolean;
+  }
   | { type: "reasoning"; text: string }
   | {
-      type: "function_call";
-      name: string;
-      arguments: string;
-      callId: string;
-    }
+    type: "function_call";
+    name: string;
+    arguments: string;
+    callId: string;
+  }
   | { type: "function_call_output"; callId: string; output: string };
 
 export interface DisplayMessage {
@@ -152,4 +180,14 @@ export interface CodexSearchResult {
   role: string;
   timestamp: string | null;
   filePath: string;
+}
+
+export interface OpencodeSearchResult {
+  projectId: string;
+  sessionId: string;
+  firstPrompt: string | null;
+  matchedText: string;
+  role: string;
+  timestamp: string | null;
+  messageId: string;
 }

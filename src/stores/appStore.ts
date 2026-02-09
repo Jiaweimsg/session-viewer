@@ -116,7 +116,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       messagesPage: 0,
     });
     try {
-      const sessions = await api.getSessions(tool, projectKey);
+      // Use grouped API for opencode, regular API for others
+      const sessions = tool === "opencode"
+        ? await api.getSessionsGrouped(tool, projectKey)
+        : await api.getSessions(tool, projectKey);
       set({ sessions, sessionsLoading: false });
     } catch (e) {
       console.error("Failed to load sessions:", e);

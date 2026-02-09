@@ -12,6 +12,13 @@ export async function getSessions(
   return invoke("get_sessions", { tool, projectKey });
 }
 
+export async function getSessionsGrouped(
+  tool: ToolType,
+  projectKey: string
+): Promise<any[]> {
+  return invoke("get_sessions_grouped", { tool, projectKey });
+}
+
 export async function getMessages(
   tool: ToolType,
   sessionKey: string,
