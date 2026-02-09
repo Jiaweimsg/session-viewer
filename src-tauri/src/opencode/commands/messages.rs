@@ -97,17 +97,11 @@ pub fn get_messages(
             .ok()
     });
 
-    let total = message_files.len();
-    let start = page * page_size;
-    let end = std::cmp::min(start + page_size, total);
-    let has_more = end < total;
-
-    // Parse messages in the current page
-    let mut messages = Vec::new();
-    for entry in message_files.iter().skip(start).take(page_size) {
+    // First pass: collect all valid messages (with content)
+    let mut all_valid_messages = Vec::new();
+    for entry in message_files.iter() {
         let path = entry.path();
         if let Ok(msg_meta) = parse_message(&path) {
-            // Convert OpenCode message to DisplayMessage
             let timestamp = Some(
                 chrono::DateTime::from_timestamp((msg_meta.time.created / 1000) as i64, 0)
                     .map(|dt| dt.to_rfc3339())
@@ -129,21 +123,34 @@ pub fn get_messages(
                 // Fallback to summary title if no parts found
                 if let Some(ref summary) = msg_meta.summary {
                     if let Some(ref title) = summary.title {
-                        content_blocks.push(DisplayContentBlock::Text {
-                            text: title.clone(),
-                        });
+                        if !title.trim().is_empty() {
+                            content_blocks.push(DisplayContentBlock::Text {
+                                text: title.clone(),
+                            });
+                        }
                     }
                 }
             }
 
-            messages.push(DisplayMessage {
-                uuid: Some(msg_meta.id.clone()),
-                role: msg_meta.role.clone(),
-                timestamp,
-                content: content_blocks,
-            });
+            // Only include messages that have actual content
+            if !content_blocks.is_empty() {
+                all_valid_messages.push(DisplayMessage {
+                    uuid: Some(msg_meta.id.clone()),
+                    role: msg_meta.role.clone(),
+                    timestamp,
+                    content: content_blocks,
+                });
+            }
         }
     }
+
+    // Now paginate the valid messages
+    let total = all_valid_messages.len();
+    let start = page * page_size;
+    let end = std::cmp::min(start + page_size, total);
+    let has_more = end < total;
+
+    let messages = all_valid_messages.into_iter().skip(start).take(page_size).collect();
 
     Ok(PaginatedMessages {
         messages,
