@@ -35,6 +35,8 @@ export function Sidebar() {
   const getProjectKey = (project: any): string => {
     if (activeTool === "codex") {
       return encodeURIComponent(project.cwd);
+    } else if (activeTool === "opencode") {
+      return project.id;
     }
     return project.encodedName;
   };
@@ -42,6 +44,8 @@ export function Sidebar() {
   const getProjectTitle = (project: any): string => {
     if (activeTool === "codex") {
       return project.cwd;
+    } else if (activeTool === "opencode") {
+      return project.worktree;
     }
     return project.displayPath;
   };
@@ -58,23 +62,30 @@ export function Sidebar() {
         <div className="flex mt-3 gap-1">
           <button
             onClick={() => handleToolSwitch("claude")}
-            className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-              activeTool === "claude"
+            className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "claude"
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:bg-accent"
-            }`}
+              }`}
           >
             Claude Code
           </button>
           <button
             onClick={() => handleToolSwitch("codex")}
-            className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-              activeTool === "codex"
+            className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "codex"
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:bg-accent"
-            }`}
+              }`}
           >
             Codex
+          </button>
+          <button
+            onClick={() => handleToolSwitch("opencode")}
+            className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "opencode"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+          >
+            OpenCode
           </button>
         </div>
       </div>
@@ -85,22 +96,20 @@ export function Sidebar() {
         <div className="mb-4">
           <button
             onClick={() => navigate(`/${activeTool}/search`)}
-            className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
-              isActive(`/${activeTool}/search`)
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive(`/${activeTool}/search`)
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-            }`}
+              }`}
           >
             <Search className="w-4 h-4" />
             全局搜索
           </button>
           <button
             onClick={() => navigate(`/${activeTool}/stats`)}
-            className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
-              isActive(`/${activeTool}/stats`)
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive(`/${activeTool}/stats`)
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-            }`}
+              }`}
           >
             <BarChart3 className="w-4 h-4" />
             使用统计
@@ -136,11 +145,10 @@ export function Sidebar() {
                     onClick={() =>
                       navigate(`/${activeTool}/projects/${projectKey}`)
                     }
-                    className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors group ${
-                      isProjectActive(projectKey)
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors group ${isProjectActive(projectKey)
                         ? "bg-accent text-accent-foreground"
                         : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                    }`}
+                      }`}
                     title={getProjectTitle(project)}
                   >
                     <FolderOpen className="w-3.5 h-3.5 shrink-0" />

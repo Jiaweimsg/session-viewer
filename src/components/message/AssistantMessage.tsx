@@ -15,22 +15,24 @@ interface Props {
 export function AssistantMessage({ message }: Props) {
   const activeTool = useAppStore((s) => s.activeTool);
   const isCodex = activeTool === "codex";
+  const isOpencode = activeTool === "opencode";
+
+  // 根据工具选择颜色
+  const bgColor = isCodex ? "bg-green-500/10" : isOpencode ? "bg-blue-500/10" : "bg-orange-500/10";
+  const iconColor = isCodex ? "text-green-500" : isOpencode ? "text-blue-500" : "text-orange-500";
+  const toolName = isCodex ? "Codex" : isOpencode ? "OpenCode" : "Claude";
 
   return (
     <div className="flex gap-3">
       <div
-        className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center ${
-          isCodex ? "bg-green-500/10" : "bg-orange-500/10"
-        }`}
+        className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center ${bgColor}`}
       >
-        <Bot
-          className={`w-3.5 h-3.5 ${isCodex ? "text-green-500" : "text-orange-500"}`}
-        />
+        <Bot className={`w-3.5 h-3.5 ${iconColor}`} />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-sm font-medium">
-            {isCodex ? "Codex" : "Claude"}
+            {toolName}
           </span>
           {message.timestamp && (
             <span className="text-xs text-muted-foreground">

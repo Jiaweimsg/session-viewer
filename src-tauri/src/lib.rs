@@ -1,5 +1,6 @@
 mod claude;
 mod codex;
+mod opencode;
 mod commands;
 mod shared_models;
 mod state;
@@ -16,6 +17,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_projects,
             commands::get_sessions,
+            commands::get_sessions_grouped,
             commands::get_messages,
             commands::global_search,
             commands::get_stats,

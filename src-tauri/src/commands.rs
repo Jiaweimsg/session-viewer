@@ -13,6 +13,10 @@ pub fn get_projects(tool: String) -> Result<Value, String> {
             let result = crate::codex::commands::projects::get_projects()?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "opencode" => {
+            let result = crate::opencode::commands::projects::get_projects()?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
@@ -36,7 +40,25 @@ pub fn get_sessions(tool: String, project_key: String) -> Result<Value, String> 
             let result = crate::codex::commands::sessions::get_sessions(cwd)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "opencode" => {
+            let result = crate::opencode::commands::sessions::get_sessions(project_key)?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
+    }
+}
+
+/// Dispatch command: get_sessions_grouped
+/// Currently only for OpenCode (returns grouped sessions with parent-child relationships)
+#[tauri::command]
+pub fn get_sessions_grouped(tool: String, project_key: String) -> Result<Value, String> {
+    match tool.as_str() {
+        "opencode" => {
+            let result = crate::opencode::commands::sessions::get_sessions_grouped(project_key)?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
+        // For other tools, fall back to regular get_sessions
+        _ => get_sessions(tool, project_key),
     }
 }
 
@@ -71,6 +93,14 @@ pub fn get_messages(
             )?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "opencode" => {
+            let result = crate::opencode::commands::messages::get_messages(
+                session_key,
+                page,
+                page_size,
+            )?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
@@ -85,6 +115,10 @@ pub fn global_search(tool: String, query: String, max_results: usize) -> Result<
         }
         "codex" => {
             let result = crate::codex::commands::search::global_search(query, max_results)?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
+        "opencode" => {
+            let result = crate::opencode::commands::search::global_search(query, max_results)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         _ => Err(format!("Unknown tool: {}", tool)),
@@ -105,6 +139,10 @@ pub fn get_stats(tool: String) -> Result<Value, String> {
             let result = crate::codex::commands::stats::get_stats()?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "opencode" => {
+            let result = crate::opencode::commands::stats::get_stats()?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
@@ -123,6 +161,11 @@ pub fn get_token_summary(tool: String) -> Result<Value, String> {
             let result = crate::codex::commands::stats::get_stats()?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "opencode" => {
+            // OpenCode also uses get_stats
+            let result = crate::opencode::commands::stats::get_stats()?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
@@ -135,6 +178,7 @@ pub fn resume_session(tool: String, session_id: String, work_dir: String) -> Res
     match tool.as_str() {
         "claude" => crate::claude::commands::terminal::resume_session(session_id, work_dir),
         "codex" => crate::codex::commands::terminal::resume_session(session_id, work_dir),
+        "opencode" => crate::opencode::commands::terminal::resume_session(session_id, work_dir),
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
