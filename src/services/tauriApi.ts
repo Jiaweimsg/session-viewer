@@ -54,7 +54,8 @@ export async function getTokenSummary(tool: ToolType): Promise<any> {
 export async function resumeSession(
   tool: ToolType,
   sessionId: string,
-  workDir: string
+  workDir: string,
+  filePath?: string
 ): Promise<void> {
-  return invoke<void>("resume_session", { tool, sessionId, workDir });
+  return invoke<void>("resume_session", { tool, sessionId, workDir, filePath });
 }

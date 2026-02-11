@@ -136,9 +136,11 @@ export interface StatsCache {
 }
 
 export interface ClaudeTokenSummary {
+  totalInputTokens: number;
+  totalOutputTokens: number;
   totalTokens: number;
   tokensByModel: Record<string, number>;
-  dailyTokens: { date: string; tokens: number }[];
+  dailyTokens: { date: string; inputTokens: number; outputTokens: number; totalTokens: number }[];
 }
 
 // Codex stats

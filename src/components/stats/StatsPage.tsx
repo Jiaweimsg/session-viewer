@@ -99,7 +99,9 @@ function ClaudeStats({
   const tokenData =
     tokenSummary?.dailyTokens.map((d) => ({
       date: d.date.slice(5),
-      tokens: d.tokens,
+      input: d.inputTokens,
+      output: d.outputTokens,
+      total: d.totalTokens,
     })) || [];
 
   const modelBreakdown = tokenSummary
@@ -117,7 +119,7 @@ function ClaudeStats({
       <h1 className="text-2xl font-bold mb-6">使用统计</h1>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
         <StatCard
           icon={<MessageSquare className="w-5 h-5" />}
           label="总消息数"
@@ -135,8 +137,13 @@ function ClaudeStats({
         />
         <StatCard
           icon={<Activity className="w-5 h-5" />}
-          label="总 Token"
-          value={formatTokens(tokenSummary?.totalTokens || 0)}
+          label="输入 Token"
+          value={formatTokens(tokenSummary?.totalInputTokens || 0)}
+        />
+        <StatCard
+          icon={<Activity className="w-5 h-5" />}
+          label="输出 Token"
+          value={formatTokens(tokenSummary?.totalOutputTokens || 0)}
         />
       </div>
 
@@ -170,9 +177,9 @@ function ClaudeStats({
       {/* Token usage chart */}
       {tokenData.length > 0 && (
         <div className="bg-card border border-border rounded-lg p-4 mb-6">
-          <h2 className="text-sm font-medium mb-4">Token 用量趋势</h2>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={tokenData}>
+          <h2 className="text-sm font-medium mb-4">每日 Token 用量</h2>
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={tokenData}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis
                 dataKey="date"
@@ -189,16 +196,11 @@ function ClaudeStats({
                   borderRadius: "6px",
                   fontSize: 12,
                 }}
-                formatter={(value: number) => [formatTokens(value), "Tokens"]}
+                formatter={(value: number, name: string) => [formatTokens(value), name === "input" ? "输入" : "输出"]}
               />
-              <Area
-                type="monotone"
-                dataKey="tokens"
-                stroke="#8b5cf6"
-                fill="#8b5cf6"
-                fillOpacity={0.2}
-              />
-            </AreaChart>
+              <Bar dataKey="input" stackId="tokens" fill="#3b82f6" name="input" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="output" stackId="tokens" fill="#f59e0b" name="output" radius={[2, 2, 0, 0]} />
+            </BarChart>
           </ResponsiveContainer>
         </div>
       )}

@@ -51,7 +51,7 @@ export function SessionsPage() {
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
     try {
-      await resumeSession(activeTool, session.sessionId, workDir);
+      await resumeSession(activeTool, session.sessionId, workDir, session.fullPath || undefined);
     } catch (err) {
       console.error("Failed to resume session:", err);
     }

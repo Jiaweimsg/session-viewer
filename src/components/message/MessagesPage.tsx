@@ -90,7 +90,7 @@ export function MessagesPage() {
         : session?.projectPath || project?.displayPath;
     if (!workDir) return;
     try {
-      await resumeSession(activeTool, sid, workDir);
+      await resumeSession(activeTool, sid, workDir, session?.fullPath || undefined);
     } catch (err) {
       console.error("Failed to resume session:", err);
     }

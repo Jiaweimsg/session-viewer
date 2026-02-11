@@ -171,12 +171,12 @@ pub fn get_token_summary(tool: String) -> Result<Value, String> {
 }
 
 /// Dispatch command: resume_session
-/// For Claude: work_dir is the project path.
+/// For Claude: work_dir is the project path, file_path is the .jsonl file path (optional).
 /// For Codex: work_dir is the cwd.
 #[tauri::command]
-pub fn resume_session(tool: String, session_id: String, work_dir: String) -> Result<(), String> {
+pub fn resume_session(tool: String, session_id: String, work_dir: String, file_path: Option<String>) -> Result<(), String> {
     match tool.as_str() {
-        "claude" => crate::claude::commands::terminal::resume_session(session_id, work_dir),
+        "claude" => crate::claude::commands::terminal::resume_session(session_id, work_dir, file_path),
         "codex" => crate::codex::commands::terminal::resume_session(session_id, work_dir),
         "opencode" => crate::opencode::commands::terminal::resume_session(session_id, work_dir),
         _ => Err(format!("Unknown tool: {}", tool)),
