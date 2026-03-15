@@ -9,6 +9,20 @@ pub fn get_session_state_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".copilot").join("session-state"))
 }
 
+/// Normalize a path so that macOS symlink variants are unified.
+/// On macOS /var is a symlink to /private/var; canonicalize to /private/var/...
+fn normalize_path(path: &str) -> String {
+    // Try to resolve the real path via the filesystem first
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return canonical.to_string_lossy().into_owned();
+    }
+    // Fallback: rewrite known macOS symlink prefix
+    if path.starts_with("/var/") {
+        return format!("/private{}", path);
+    }
+    path.to_string()
+}
+
 /// Parse a flat YAML file (key: value lines only) into key-value pairs
 fn parse_flat_yaml(content: &str) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
@@ -61,7 +75,8 @@ pub fn scan_session_dir(dir: &Path) -> Option<CopilotSession> {
     let yaml = parse_flat_yaml(&content);
 
     let session_id = yaml.get("id")?.clone();
-    let cwd = yaml.get("cwd")?.clone();
+    let cwd = normalize_path(yaml.get("cwd")?);
+    let git_root = yaml.get("git_root").map(|s| normalize_path(s));
 
     let events_path = dir.join("events.jsonl");
     let message_count = if events_path.exists() {
@@ -78,7 +93,7 @@ pub fn scan_session_dir(dir: &Path) -> Option<CopilotSession> {
     Some(CopilotSession {
         session_id,
         cwd,
-        git_root: yaml.get("git_root").cloned(),
+        git_root,
         branch: yaml.get("branch").cloned(),
         summary: yaml.get("summary").cloned(),
         created_at: yaml.get("created_at").cloned().unwrap_or_default(),
