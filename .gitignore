@@ -24,6 +24,5 @@ src-tauri/WixTools/
 src-tauri/gen/
 
 .spec-workflow/
-# macOS metadata & build cache
+# macOS metadata files
 ._*
-tsconfig.tsbuildinfo
