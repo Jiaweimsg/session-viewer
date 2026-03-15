@@ -32,6 +32,8 @@ export function SessionsPage() {
   const project =
     activeTool === "codex"
       ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
+      : activeTool === "copilot"
+      ? projects.find((p) => p.workspaceHash === projectKey)
       : projects.find((p) => p.encodedName === projectKey);
 
   useEffect(() => {
@@ -48,6 +50,8 @@ export function SessionsPage() {
     const workDir =
       activeTool === "codex"
         ? session.cwd
+        : activeTool === "copilot"
+        ? session.workspacePath || project?.workspacePath || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
     try {
@@ -62,11 +66,15 @@ export function SessionsPage() {
     const workDir =
       activeTool === "codex"
         ? session.cwd
+        : activeTool === "copilot"
+        ? session.workspacePath || project?.workspacePath || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
     const cmd =
       activeTool === "codex"
         ? `cd '${workDir}' && codex resume ${session.sessionId}`
+        : activeTool === "copilot"
+        ? `code '${workDir}'`
         : `cd '${workDir}' && claude --resume ${session.sessionId}`;
     navigator.clipboard.writeText(cmd).then(() => {
       setCopiedId(session.sessionId);
@@ -76,6 +84,9 @@ export function SessionsPage() {
 
   const getSessionNavKey = (session: any): string => {
     if (activeTool === "codex") {
+      return encodeURIComponent(session.filePath);
+    }
+    if (activeTool === "copilot") {
       return encodeURIComponent(session.filePath);
     }
     return session.sessionId;
@@ -100,7 +111,11 @@ export function SessionsPage() {
           </h1>
           {project && (
             <p className="text-sm text-muted-foreground mt-0.5">
-              {activeTool === "codex" ? project.cwd : project.displayPath}
+              {activeTool === "codex"
+                ? project.cwd
+                : activeTool === "copilot"
+                ? project.workspacePath
+                : project.displayPath}
             </p>
           )}
         </div>
@@ -157,6 +172,16 @@ export function SessionsPage() {
                     {activeTool === "codex" && session.model && (
                       <span className="text-muted-foreground/60 font-mono">
                         {session.model}
+                      </span>
+                    )}
+                    {activeTool === "copilot" && session.title && (
+                      <span className="text-muted-foreground/80 italic truncate max-w-xs">
+                        {session.title}
+                      </span>
+                    )}
+                    {activeTool === "copilot" && session.modelId && (
+                      <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-500 rounded text-xs font-medium">
+                        {session.modelId.replace("copilot/", "")}
                       </span>
                     )}
                     {session.modified && (
