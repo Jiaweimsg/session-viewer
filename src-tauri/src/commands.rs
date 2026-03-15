@@ -138,7 +138,7 @@ pub fn global_search(tool: String, query: String, max_results: usize) -> Result<
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         "copilot" => {
-            let result = crate::copilot::commands::search::global_search(query, max_results)?;
+            let result = crate::copilot::commands::search::search_sessions(query)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         _ => Err(format!("Unknown tool: {}", tool)),

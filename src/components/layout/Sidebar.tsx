@@ -38,7 +38,7 @@ export function Sidebar() {
     } else if (activeTool === "opencode") {
       return project.id;
     } else if (activeTool === "copilot") {
-      return project.workspaceHash;
+      return encodeURIComponent(project.cwd);
     }
     return project.encodedName;
   };
@@ -49,7 +49,7 @@ export function Sidebar() {
     } else if (activeTool === "opencode") {
       return project.worktree;
     } else if (activeTool === "copilot") {
-      return project.workspacePath;
+      return project.cwd;
     }
     return project.displayPath;
   };

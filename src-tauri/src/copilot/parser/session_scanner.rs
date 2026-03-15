@@ -1,133 +1,129 @@
-use std::path::PathBuf;
 use std::fs;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 
-/// Returns the VS Code workspace storage root directory.
-/// macOS: ~/Library/Application Support/Code/User/workspaceStorage
-/// Linux: ~/.config/Code/User/workspaceStorage
-/// Windows: %APPDATA%\Code\User\workspaceStorage
-pub fn get_workspace_storage_dir() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        dirs::home_dir().map(|h| {
-            h.join("Library/Application Support/Code/User/workspaceStorage")
-        })
-    }
-    #[cfg(target_os = "linux")]
-    {
-        dirs::config_dir().map(|c| c.join("Code/User/workspaceStorage"))
-    }
-    #[cfg(target_os = "windows")]
-    {
-        dirs::data_dir().map(|d| d.join("Code/User/workspaceStorage"))
-    }
+use crate::copilot::models::session::CopilotSession;
+
+/// Path to the Copilot CLI session-state directory
+pub fn get_session_state_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".copilot").join("session-state"))
 }
 
-/// Extract the human-readable workspace path from a workspace.json file.
-/// The file contains either `{"folder": "file:///path"}` or `{"workspace": "file:///path"}`.
-pub fn get_workspace_path(workspace_storage: &PathBuf, hash: &str) -> Option<String> {
-    let workspace_json = workspace_storage.join(hash).join("workspace.json");
-    let content = fs::read_to_string(&workspace_json).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-
-    let uri = json
-        .get("folder")
-        .or_else(|| json.get("workspace"))
-        .and_then(|v| v.as_str())?
-        .to_string();
-
-    // Decode percent-encoded URI: strip "file://" prefix, decode %20 etc.
-    let path = uri
-        .strip_prefix("file://")
-        .unwrap_or(&uri)
-        .to_string();
-
-    // URL-decode
-    let decoded = percent_decode(&path);
-    Some(decoded)
-}
-
-fn percent_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Ok(h), Ok(l)) = (
-                std::str::from_utf8(&bytes[i + 1..i + 2]),
-                std::str::from_utf8(&bytes[i + 2..i + 3]),
-            ) {
-                if let Ok(byte) = u8::from_str_radix(&format!("{}{}", h, l), 16) {
-                    result.push(byte as char);
-                    i += 3;
-                    continue;
-                }
-            }
-        }
-        result.push(bytes[i] as char);
-        i += 1;
-    }
-    result
-}
-
-/// List all workspace hashes that contain a chatSessions directory.
-pub fn scan_workspace_hashes(workspace_storage: &PathBuf) -> Vec<String> {
-    let mut hashes = Vec::new();
-
-    if let Ok(entries) = fs::read_dir(workspace_storage) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let chat_sessions = path.join("chatSessions");
-                if chat_sessions.exists() {
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        hashes.push(name.to_string());
-                    }
-                }
+/// Parse a flat YAML file (key: value lines only) into key-value pairs
+fn parse_flat_yaml(content: &str) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    for line in content.lines() {
+        if let Some(colon) = line.find(':') {
+            let key = line[..colon].trim().to_string();
+            let value = line[colon + 1..].trim().to_string();
+            if !key.is_empty() && !value.is_empty() {
+                map.insert(key, value);
             }
         }
     }
-
-    hashes
+    map
 }
 
-/// List all chat session files (.json and .jsonl) for a workspace.
-pub fn scan_session_files(workspace_storage: &PathBuf, workspace_hash: &str) -> Vec<PathBuf> {
-    let chat_dir = workspace_storage.join(workspace_hash).join("chatSessions");
-    let mut files = Vec::new();
+/// Count user.message lines in events.jsonl (fast scan, no full parse)
+fn count_messages(events_path: &Path) -> usize {
+    let file = match fs::File::open(events_path) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+    let reader = BufReader::new(file);
+    reader
+        .lines()
+        .filter_map(|l| l.ok())
+        .filter(|l| l.contains("\"type\":\"user.message\"") || l.contains("\"type\":\"assistant.message\""))
+        .count()
+}
 
-    if let Ok(entries) = fs::read_dir(&chat_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    if ext == "json" || ext == "jsonl" {
-                        files.push(path);
-                    }
-                }
+/// Extract the first user message content from events.jsonl
+fn extract_first_prompt(events_path: &Path) -> Option<String> {
+    let file = fs::File::open(events_path).ok()?;
+    let reader = BufReader::new(file);
+    for line in reader.lines().filter_map(|l| l.ok()) {
+        if line.contains("\"type\":\"user.message\"") {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                let content = v["data"]["content"].as_str()?;
+                let preview: String = content.chars().take(200).collect();
+                return Some(preview);
             }
         }
     }
-
-    files
+    None
 }
 
-/// List all session files across all workspaces.
-pub fn scan_all_session_files(workspace_storage: &PathBuf) -> Vec<PathBuf> {
-    let hashes = scan_workspace_hashes(workspace_storage);
-    let mut all = Vec::new();
-    for hash in &hashes {
-        all.extend(scan_session_files(workspace_storage, hash));
-    }
-    all
+/// Scan a single session directory and return a CopilotSession
+pub fn scan_session_dir(dir: &Path) -> Option<CopilotSession> {
+    let yaml_path = dir.join("workspace.yaml");
+    let content = fs::read_to_string(&yaml_path).ok()?;
+    let yaml = parse_flat_yaml(&content);
+
+    let session_id = yaml.get("id")?.clone();
+    let cwd = yaml.get("cwd")?.clone();
+
+    let events_path = dir.join("events.jsonl");
+    let message_count = if events_path.exists() {
+        count_messages(&events_path)
+    } else {
+        0
+    };
+    let first_prompt = if events_path.exists() {
+        extract_first_prompt(&events_path)
+    } else {
+        None
+    };
+
+    Some(CopilotSession {
+        session_id,
+        cwd,
+        git_root: yaml.get("git_root").cloned(),
+        branch: yaml.get("branch").cloned(),
+        summary: yaml.get("summary").cloned(),
+        created_at: yaml.get("created_at").cloned().unwrap_or_default(),
+        updated_at: yaml.get("updated_at").cloned(),
+        message_count,
+        first_prompt,
+    })
 }
 
-/// Extract the short name (last path component) from a workspace path string.
-pub fn short_name_from_path(path: &str) -> String {
-    // Strip trailing slashes
-    let path = path.trim_end_matches('/').trim_end_matches('\\');
-    PathBuf::from(path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-        .to_string()
+/// Scan all session directories and return sessions for a specific cwd
+pub fn scan_sessions_for_cwd(target_cwd: &str) -> Vec<CopilotSession> {
+    let Some(state_dir) = get_session_state_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(&state_dir) else {
+        return Vec::new();
+    };
+
+    let mut sessions: Vec<CopilotSession> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| scan_session_dir(&e.path()))
+        .filter(|s| s.cwd == target_cwd)
+        .collect();
+
+    sessions.sort_by(|a, b| {
+        let ta = a.updated_at.as_deref().unwrap_or(&a.created_at);
+        let tb = b.updated_at.as_deref().unwrap_or(&b.created_at);
+        tb.cmp(ta)
+    });
+    sessions
+}
+
+/// Scan all session directories and return all sessions
+pub fn scan_all_sessions() -> Vec<CopilotSession> {
+    let Some(state_dir) = get_session_state_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(&state_dir) else {
+        return Vec::new();
+    };
+
+    entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| scan_session_dir(&e.path()))
+        .collect()
 }

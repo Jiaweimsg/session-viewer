@@ -41,21 +41,25 @@ export function MessagesPage() {
   }, []);
 
   const session =
-    activeTool === "codex" || activeTool === "copilot"
+    activeTool === "codex"
       ? sessions.find((s) => encodeURIComponent(s.filePath) === sessionKey)
+      : activeTool === "copilot"
+      ? sessions.find((s) => s.sessionId === sessionKey)
       : sessions.find((s) => s.sessionId === sessionKey);
 
   const project =
     activeTool === "codex"
       ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
       : activeTool === "copilot"
-      ? projects.find((p) => p.workspaceHash === projectKey)
+      ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
       : projects.find((p) => p.encodedName === projectKey);
 
   useEffect(() => {
     if (sessionKey) {
       if (activeTool === "claude") {
         selectSession(sessionKey, projectKey);
+      } else if (activeTool === "copilot") {
+        selectSession(sessionKey);
       } else {
         selectSession(decodeURIComponent(sessionKey));
       }

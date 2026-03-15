@@ -197,8 +197,7 @@ export interface OpencodeSearchResult {
 // ============ Copilot ============
 
 export interface CopilotProject {
-  workspaceHash: string;
-  workspacePath: string;
+  cwd: string;
   shortName: string;
   sessionCount: number;
   lastModified: string | null;
@@ -206,39 +205,17 @@ export interface CopilotProject {
 
 export interface CopilotSession {
   sessionId: string;
-  workspaceHash: string;
-  filePath: string;
-  title: string | null;
-  firstPrompt: string | null;
+  cwd: string;
+  gitRoot: string | null;
+  branch: string | null;
+  summary: string | null;
+  createdAt: string;
+  updatedAt: string | null;
   messageCount: number;
-  created: string | null;
-  modified: string | null;
-  modelId: string | null;
-}
-
-export interface CopilotSearchResult {
-  workspaceHash: string;
-  sessionId: string;
-  filePath: string;
   firstPrompt: string | null;
-  matchedText: string;
-  role: string;
-  timestamp: string | null;
 }
 
-export interface CopilotTokenSummary {
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalTokens: number;
-  tokensByModel: Record<string, number>;
-  dailyTokens: CopilotDailyTokenEntry[];
-  sessionCount: number;
-  messageCount: number;
-}
-
-export interface CopilotDailyTokenEntry {
-  date: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
+export interface CopilotStats {
+  totalSessions: number;
+  totalProjects: number;
 }

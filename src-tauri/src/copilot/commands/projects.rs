@@ -1,58 +1,48 @@
-use crate::copilot::models::project::CopilotProjectEntry;
-use crate::copilot::parser::session_scanner::{
-    get_workspace_storage_dir, get_workspace_path, scan_workspace_hashes,
-    scan_session_files, short_name_from_path,
-};
+use std::collections::HashMap;
+use std::path::Path;
 
-pub fn get_projects() -> Result<Vec<CopilotProjectEntry>, String> {
-    let storage_dir = get_workspace_storage_dir()
-        .ok_or_else(|| "Could not determine VS Code workspace storage directory".to_string())?;
+use crate::copilot::models::project::CopilotProject;
+use crate::copilot::parser::session_scanner::{get_session_state_dir, scan_all_sessions};
 
-    if !storage_dir.exists() {
-        return Ok(vec![]);
+/// List all Copilot CLI projects (sessions grouped by cwd)
+pub fn get_projects() -> Result<Vec<CopilotProject>, String> {
+    let state_dir =
+        get_session_state_dir().ok_or("Could not find ~/.copilot/session-state directory")?;
+    if !state_dir.exists() {
+        return Ok(Vec::new());
     }
 
-    let hashes = scan_workspace_hashes(&storage_dir);
-    let mut projects = Vec::new();
+    let sessions = scan_all_sessions();
 
-    for hash in hashes {
-        let workspace_path = match get_workspace_path(&storage_dir, &hash) {
-            Some(p) => p,
-            None => continue,
-        };
-
-        let session_files = scan_session_files(&storage_dir, &hash);
-        let session_count = session_files.len();
-
-        if session_count == 0 {
-            continue;
-        }
-
-        let last_modified = session_files
-            .iter()
-            .filter_map(|p| {
-                std::fs::metadata(p).ok().and_then(|m| {
-                    m.modified().ok().map(|t| {
-                        let d = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-                        chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
-                            .map(|dt| dt.to_rfc3339())
-                            .unwrap_or_default()
-                    })
-                })
-            })
-            .max();
-
-        projects.push(CopilotProjectEntry {
-            short_name: short_name_from_path(&workspace_path),
-            workspace_hash: hash,
-            workspace_path,
-            session_count,
-            last_modified,
-        });
+    // Group by cwd
+    let mut by_cwd: HashMap<String, Vec<_>> = HashMap::new();
+    for session in sessions {
+        by_cwd.entry(session.cwd.clone()).or_default().push(session);
     }
 
-    // Sort by most recently modified
+    let mut projects: Vec<CopilotProject> = by_cwd
+        .into_iter()
+        .map(|(cwd, sessions)| {
+            let short_name = Path::new(&cwd)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&cwd)
+                .to_string();
+
+            let last_modified = sessions
+                .iter()
+                .map(|s| s.updated_at.as_deref().unwrap_or(&s.created_at).to_string())
+                .max();
+
+            CopilotProject {
+                cwd,
+                short_name,
+                session_count: sessions.len(),
+                last_modified,
+            }
+        })
+        .collect();
+
     projects.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
-
     Ok(projects)
 }
