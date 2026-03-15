@@ -16,11 +16,12 @@ export function AssistantMessage({ message }: Props) {
   const activeTool = useAppStore((s) => s.activeTool);
   const isCodex = activeTool === "codex";
   const isOpencode = activeTool === "opencode";
+  const isCopilot = activeTool === "copilot";
 
   // 根据工具选择颜色
-  const bgColor = isCodex ? "bg-green-500/10" : isOpencode ? "bg-blue-500/10" : "bg-orange-500/10";
-  const iconColor = isCodex ? "text-green-500" : isOpencode ? "text-blue-500" : "text-orange-500";
-  const toolName = isCodex ? "Codex" : isOpencode ? "OpenCode" : "Claude";
+  const bgColor = isCodex ? "bg-green-500/10" : isOpencode ? "bg-blue-500/10" : isCopilot ? "bg-purple-500/10" : "bg-orange-500/10";
+  const iconColor = isCodex ? "text-green-500" : isOpencode ? "text-blue-500" : isCopilot ? "text-purple-500" : "text-orange-500";
+  const toolName = isCodex ? "Codex" : isOpencode ? "OpenCode" : isCopilot ? "Copilot" : "Claude";
 
   return (
     <div className="flex gap-3">

@@ -4,12 +4,15 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::copilot::models::message::{DisplayContentBlock, DisplayMessage, PaginatedMessages};
+use crate::shared_models::{DisplayContentBlock, DisplayMessage, PaginatedMessages};
+
+/// Internal tools that are not meaningful to display to the user
+const SKIP_TOOLS: &[&str] = &["report_intent", "update_intent"];
 
 /// Parse the events.jsonl for a Copilot CLI session and return paginated messages.
 ///
-/// Messages are grouped so that all assistant turns between two user messages are
-/// combined into a single assistant DisplayMessage (matching the logical conversation flow).
+/// All assistant turns between two user messages are merged into a single
+/// assistant DisplayMessage so the conversation looks natural.
 pub fn parse_session_messages(
     events_path: &Path,
     page: usize,
@@ -18,8 +21,8 @@ pub fn parse_session_messages(
     // First pass: collect tool outputs keyed by toolCallId
     let mut tool_outputs: std::collections::HashMap<String, String> = Default::default();
     {
-        let file =
-            fs::File::open(events_path).map_err(|e| format!("Failed to open events.jsonl: {}", e))?;
+        let file = fs::File::open(events_path)
+            .map_err(|e| format!("Failed to open events.jsonl: {}", e))?;
         for line in BufReader::new(file).lines().filter_map(|l| l.ok()) {
             let trimmed = line.trim();
             if !trimmed.contains("\"type\":\"tool.execution_complete\"") {
@@ -37,29 +40,27 @@ pub fn parse_session_messages(
     }
 
     // Second pass: build messages, grouping consecutive assistant turns into one
-    let file =
-        fs::File::open(events_path).map_err(|e| format!("Failed to open events.jsonl: {}", e))?;
+    let file = fs::File::open(events_path)
+        .map_err(|e| format!("Failed to open events.jsonl: {}", e))?;
 
     let mut messages: Vec<DisplayMessage> = Vec::new();
-    // Accumulated blocks for the current assistant response (across multiple turns)
-    let mut pending_asst_blocks: Vec<DisplayContentBlock> = Vec::new();
-    let mut pending_asst_ts: Option<String> = None;
+    let mut pending_blocks: Vec<DisplayContentBlock> = Vec::new();
+    let mut pending_ts: Option<String> = None;
     let mut msg_id_counter = 0usize;
 
-    let flush_assistant = |blocks: &mut Vec<DisplayContentBlock>,
-                           ts: &mut Option<String>,
-                           counter: &mut usize,
-                           msgs: &mut Vec<DisplayMessage>| {
-        if !blocks.is_empty() {
-            *counter += 1;
-            msgs.push(DisplayMessage {
-                id: format!("asst-{}", counter),
-                role: "assistant".to_string(),
-                timestamp: ts.take(),
-                content: std::mem::take(blocks),
-            });
-        }
-    };
+    macro_rules! flush_assistant {
+        () => {
+            if !pending_blocks.is_empty() {
+                msg_id_counter += 1;
+                messages.push(DisplayMessage {
+                    uuid: Some(format!("copilot-asst-{}", msg_id_counter)),
+                    role: "assistant".to_string(),
+                    timestamp: pending_ts.take(),
+                    content: std::mem::take(&mut pending_blocks),
+                });
+            }
+        };
+    }
 
     for line in BufReader::new(file).lines().filter_map(|l| l.ok()) {
         let trimmed = line.trim();
@@ -76,30 +77,20 @@ pub fn parse_session_messages(
 
         match event_type.as_deref() {
             Some("user.message") => {
-                // Flush any pending assistant blocks before emitting user message
-                flush_assistant(
-                    &mut pending_asst_blocks,
-                    &mut pending_asst_ts,
-                    &mut msg_id_counter,
-                    &mut messages,
-                );
+                flush_assistant!();
 
                 if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
                     let content = v["data"]["content"].as_str().unwrap_or("").to_string();
                     let ts = v["timestamp"].as_str().map(|s| s.to_string());
-                    if !content.trim().is_empty() {
+                    // Skip auto-injected resume context messages
+                    let is_resume = content.contains("RESUME CONTEXT FOR CONTINUING TASK");
+                    if !content.trim().is_empty() && !is_resume {
                         msg_id_counter += 1;
                         messages.push(DisplayMessage {
-                            id: format!("user-{}", msg_id_counter),
+                            uuid: Some(format!("copilot-user-{}", msg_id_counter)),
                             role: "user".to_string(),
                             timestamp: ts,
-                            content: vec![DisplayContentBlock {
-                                block_type: "text".to_string(),
-                                text: Some(content),
-                                tool_name: None,
-                                tool_input: None,
-                                tool_output: None,
-                            }],
+                            content: vec![DisplayContentBlock::Text { text: content }],
                         });
                     }
                 }
@@ -110,42 +101,43 @@ pub fn parse_session_messages(
                     let text = v["data"]["content"].as_str().unwrap_or("").to_string();
                     let ts = v["timestamp"].as_str().map(|s| s.to_string());
 
-                    // Record timestamp of the first block in this response
-                    if pending_asst_ts.is_none() {
-                        pending_asst_ts = ts;
+                    if pending_ts.is_none() {
+                        pending_ts = ts;
                     }
 
                     if !text.trim().is_empty() {
-                        pending_asst_blocks.push(DisplayContentBlock {
-                            block_type: "text".to_string(),
-                            text: Some(text),
-                            tool_name: None,
-                            tool_input: None,
-                            tool_output: None,
-                        });
+                        pending_blocks.push(DisplayContentBlock::Text { text });
                     }
 
                     if let Some(tool_requests) = v["data"]["toolRequests"].as_array() {
                         for req in tool_requests {
                             let name = req["name"].as_str().unwrap_or("").to_string();
-                            // Skip internal/cosmetic tools from display
-                            if name == "report_intent" || name == "update_intent" {
+                            if SKIP_TOOLS.contains(&name.as_str()) {
                                 continue;
                             }
-                            let call_id = req["toolCallId"].as_str().unwrap_or("");
-                            let args = req["arguments"]
+                            let call_id = req["toolCallId"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
+                            let input = req["arguments"]
                                 .as_object()
                                 .map(|o| serde_json::to_string_pretty(o).unwrap_or_default())
-                                .or_else(|| req["arguments"].as_str().map(|s| s.to_string()));
-                            let output = tool_outputs.get(call_id).cloned();
+                                .or_else(|| req["arguments"].as_str().map(|s| s.to_string()))
+                                .unwrap_or_default();
 
-                            pending_asst_blocks.push(DisplayContentBlock {
-                                block_type: "tool_use".to_string(),
-                                text: None,
-                                tool_name: Some(name),
-                                tool_input: args,
-                                tool_output: output,
+                            pending_blocks.push(DisplayContentBlock::ToolUse {
+                                id: call_id.clone(),
+                                name: name.clone(),
+                                input,
                             });
+
+                            if let Some(output) = tool_outputs.get(&call_id) {
+                                pending_blocks.push(DisplayContentBlock::ToolResult {
+                                    tool_use_id: call_id,
+                                    content: output.clone(),
+                                    is_error: false,
+                                });
+                            }
                         }
                     }
                 }
@@ -155,13 +147,7 @@ pub fn parse_session_messages(
         }
     }
 
-    // Flush any trailing assistant blocks
-    flush_assistant(
-        &mut pending_asst_blocks,
-        &mut pending_asst_ts,
-        &mut msg_id_counter,
-        &mut messages,
-    );
+    flush_assistant!();
 
     let total = messages.len();
     let start = page * page_size;

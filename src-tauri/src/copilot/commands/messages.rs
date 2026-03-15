@@ -1,6 +1,6 @@
-use crate::copilot::models::message::PaginatedMessages;
 use crate::copilot::parser::session_parser::parse_session_messages;
 use crate::copilot::parser::session_scanner::get_session_state_dir;
+use crate::shared_models::PaginatedMessages;
 
 /// Get paginated messages for a Copilot CLI session
 pub fn get_messages(
