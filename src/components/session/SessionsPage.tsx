@@ -32,6 +32,8 @@ export function SessionsPage() {
   const project =
     activeTool === "codex"
       ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
+      : activeTool === "copilot"
+      ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
       : projects.find((p) => p.encodedName === projectKey);
 
   useEffect(() => {
@@ -48,6 +50,8 @@ export function SessionsPage() {
     const workDir =
       activeTool === "codex"
         ? session.cwd
+        : activeTool === "copilot"
+        ? session.cwd || project?.cwd || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
     try {
@@ -62,11 +66,15 @@ export function SessionsPage() {
     const workDir =
       activeTool === "codex"
         ? session.cwd
+        : activeTool === "copilot"
+        ? session.cwd || project?.cwd || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
     const cmd =
       activeTool === "codex"
         ? `cd '${workDir}' && codex resume ${session.sessionId}`
+        : activeTool === "copilot"
+        ? `cd '${workDir}' && copilot --resume=${session.sessionId}`
         : `cd '${workDir}' && claude --resume ${session.sessionId}`;
     navigator.clipboard.writeText(cmd).then(() => {
       setCopiedId(session.sessionId);
@@ -77,6 +85,9 @@ export function SessionsPage() {
   const getSessionNavKey = (session: any): string => {
     if (activeTool === "codex") {
       return encodeURIComponent(session.filePath);
+    }
+    if (activeTool === "copilot") {
+      return session.sessionId;
     }
     return session.sessionId;
   };
@@ -100,7 +111,11 @@ export function SessionsPage() {
           </h1>
           {project && (
             <p className="text-sm text-muted-foreground mt-0.5">
-              {activeTool === "codex" ? project.cwd : project.displayPath}
+              {activeTool === "codex"
+                ? project.cwd
+                : activeTool === "copilot"
+                ? project.cwd
+                : project.displayPath}
             </p>
           )}
         </div>
@@ -159,16 +174,37 @@ export function SessionsPage() {
                         {session.model}
                       </span>
                     )}
-                    {session.modified && (
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {formatDistanceToNow(
-                          new Date(session.modified),
-                          { addSuffix: true, locale: zhCN }
-                        )}
+                    {activeTool === "copilot" && session.summary && (
+                      <span className="text-muted-foreground/80 italic truncate max-w-xs">
+                        {session.summary}
                       </span>
                     )}
-                    {session.created && (
+                    {activeTool === "copilot" && session.branch && (
+                      <span className="flex items-center gap-1">
+                        <GitBranch className="w-3 h-3" />
+                        {session.branch}
+                      </span>
+                    )}
+                    {activeTool === "copilot"
+                      ? (session.updatedAt || session.createdAt) && (
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {formatDistanceToNow(
+                              new Date(session.updatedAt || session.createdAt),
+                              { addSuffix: true, locale: zhCN }
+                            )}
+                          </span>
+                        )
+                      : session.modified && (
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {formatDistanceToNow(
+                              new Date(session.modified),
+                              { addSuffix: true, locale: zhCN }
+                            )}
+                          </span>
+                        )}
+                    {activeTool !== "copilot" && session.created && (
                       <span className="text-muted-foreground/60">
                         创建于{" "}
                         {format(new Date(session.created), "yyyy-MM-dd HH:mm")}

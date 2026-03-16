@@ -17,6 +17,10 @@ pub fn get_projects(tool: String) -> Result<Value, String> {
             let result = crate::opencode::commands::projects::get_projects()?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "copilot" => {
+            let result = crate::copilot::commands::projects::get_projects()?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
@@ -42,6 +46,10 @@ pub fn get_sessions(tool: String, project_key: String) -> Result<Value, String> 
         }
         "opencode" => {
             let result = crate::opencode::commands::sessions::get_sessions(project_key)?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
+        "copilot" => {
+            let result = crate::copilot::commands::sessions::get_sessions(project_key)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         _ => Err(format!("Unknown tool: {}", tool)),
@@ -101,6 +109,14 @@ pub fn get_messages(
             )?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "copilot" => {
+            let result = crate::copilot::commands::messages::get_messages(
+                session_key,
+                page,
+                page_size,
+            )?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
@@ -119,6 +135,10 @@ pub fn global_search(tool: String, query: String, max_results: usize) -> Result<
         }
         "opencode" => {
             let result = crate::opencode::commands::search::global_search(query, max_results)?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
+        "copilot" => {
+            let result = crate::copilot::commands::search::search_sessions(query)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         _ => Err(format!("Unknown tool: {}", tool)),
@@ -141,6 +161,10 @@ pub fn get_stats(tool: String) -> Result<Value, String> {
         }
         "opencode" => {
             let result = crate::opencode::commands::stats::get_stats()?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
+        "copilot" => {
+            let result = crate::copilot::commands::stats::get_stats()?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         _ => Err(format!("Unknown tool: {}", tool)),
@@ -166,6 +190,10 @@ pub fn get_token_summary(tool: String) -> Result<Value, String> {
             let result = crate::opencode::commands::stats::get_stats()?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "copilot" => {
+            let result = crate::copilot::commands::stats::get_stats()?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
@@ -179,6 +207,7 @@ pub fn resume_session(tool: String, session_id: String, work_dir: String, file_p
         "claude" => crate::claude::commands::terminal::resume_session(session_id, work_dir, file_path),
         "codex" => crate::codex::commands::terminal::resume_session(session_id, work_dir),
         "opencode" => crate::opencode::commands::terminal::resume_session(session_id, work_dir),
+        "copilot" => crate::copilot::commands::terminal::resume_session(session_id, work_dir),
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }

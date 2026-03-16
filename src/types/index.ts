@@ -1,5 +1,5 @@
 // Tool type discriminator
-export type ToolType = "claude" | "codex" | "opencode";
+export type ToolType = "claude" | "codex" | "opencode" | "copilot";
 
 // ============ Projects ============
 
@@ -192,4 +192,30 @@ export interface OpencodeSearchResult {
   role: string;
   timestamp: string | null;
   messageId: string;
+}
+
+// ============ Copilot ============
+
+export interface CopilotProject {
+  cwd: string;
+  shortName: string;
+  sessionCount: number;
+  lastModified: string | null;
+}
+
+export interface CopilotSession {
+  sessionId: string;
+  cwd: string;
+  gitRoot: string | null;
+  branch: string | null;
+  summary: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+  messageCount: number;
+  firstPrompt: string | null;
+}
+
+export interface CopilotStats {
+  totalSessions: number;
+  totalProjects: number;
 }

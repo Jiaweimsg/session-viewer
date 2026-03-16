@@ -37,6 +37,8 @@ export function Sidebar() {
       return encodeURIComponent(project.cwd);
     } else if (activeTool === "opencode") {
       return project.id;
+    } else if (activeTool === "copilot") {
+      return encodeURIComponent(project.cwd);
     }
     return project.encodedName;
   };
@@ -46,6 +48,8 @@ export function Sidebar() {
       return project.cwd;
     } else if (activeTool === "opencode") {
       return project.worktree;
+    } else if (activeTool === "copilot") {
+      return project.cwd;
     }
     return project.displayPath;
   };
@@ -59,10 +63,10 @@ export function Sidebar() {
           Session Viewer
         </h1>
         {/* Tool switcher */}
-        <div className="flex mt-3 gap-1">
+        <div className="grid grid-cols-2 mt-3 gap-1">
           <button
             onClick={() => handleToolSwitch("claude")}
-            className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "claude"
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "claude"
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:bg-accent"
               }`}
@@ -71,7 +75,7 @@ export function Sidebar() {
           </button>
           <button
             onClick={() => handleToolSwitch("codex")}
-            className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "codex"
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "codex"
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:bg-accent"
               }`}
@@ -80,12 +84,21 @@ export function Sidebar() {
           </button>
           <button
             onClick={() => handleToolSwitch("opencode")}
-            className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "opencode"
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "opencode"
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:bg-accent"
               }`}
           >
             OpenCode
+          </button>
+          <button
+            onClick={() => handleToolSwitch("copilot")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "copilot"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+          >
+            Copilot
           </button>
         </div>
       </div>
