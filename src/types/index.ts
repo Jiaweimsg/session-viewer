@@ -1,5 +1,5 @@
 // Tool type discriminator
-export type ToolType = "claude" | "codex" | "opencode" | "copilot";
+export type ToolType = "claude" | "codex" | "opencode" | "copilot" | "cursor";
 
 // ============ Projects ============
 
@@ -218,4 +218,40 @@ export interface CopilotSession {
 export interface CopilotStats {
   totalSessions: number;
   totalProjects: number;
+}
+
+// ============ Cursor ============
+
+export interface CursorProject {
+  encodedName: string;
+  displayPath: string;
+  shortName: string;
+  sessionCount: number;
+  lastModified: string | null;
+}
+
+export interface CursorSession {
+  sessionId: string;
+  filePath: string;
+  firstPrompt: string | null;
+  messageCount: number;
+  created: string | null;
+  modified: string | null;
+}
+
+export interface CursorSearchResult {
+  encodedName: string;
+  projectName: string;
+  sessionId: string;
+  firstPrompt: string | null;
+  matchedText: string;
+  role: string;
+  timestamp: string | null;
+  filePath: string;
+}
+
+export interface CursorStats {
+  totalSessions: number;
+  totalProjects: number;
+  totalMessages: number;
 }

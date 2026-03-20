@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useAppStore } from "../../stores/appStore";
-import type { StatsCache, ClaudeTokenSummary, CodexTokenSummary } from "../../types";
+import type { StatsCache, ClaudeTokenSummary, CodexTokenSummary, CursorStats as CursorStatsType } from "../../types";
 import {
   BarChart,
   Bar,
@@ -48,6 +48,10 @@ export function StatsPage() {
 
   if (activeTool === "codex" || activeTool === "opencode") {
     return <CodexStats stats={stats as CodexTokenSummary} />;
+  }
+
+  if (activeTool === "cursor" || activeTool === "copilot") {
+    return <CursorStatsView stats={stats as CursorStatsType} />;
   }
 
   return (
@@ -380,6 +384,36 @@ function CodexStats({ stats }: { stats: CodexTokenSummary }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ============ Cursor / Copilot Stats ============
+
+function CursorStatsView({ stats }: { stats: CursorStatsType }) {
+  if (!stats) return null;
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto">
+      <h1 className="text-2xl font-bold mb-6">使用统计</h1>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <StatCard
+          icon={<Calendar className="w-5 h-5" />}
+          label="总会话数"
+          value={(stats.totalSessions ?? 0).toLocaleString()}
+        />
+        <StatCard
+          icon={<Activity className="w-5 h-5" />}
+          label="总项目数"
+          value={(stats.totalProjects ?? 0).toLocaleString()}
+        />
+        <StatCard
+          icon={<MessageSquare className="w-5 h-5" />}
+          label="总消息数"
+          value={(stats.totalMessages ?? 0).toLocaleString()}
+        />
+      </div>
     </div>
   );
 }

@@ -40,6 +40,10 @@ export function SearchPage() {
       navigate(
         `/${activeTool}/projects/${encodeURIComponent(result.cwd)}/session/${encodeURIComponent(result.filePath)}`
       );
+    } else if (activeTool === "cursor") {
+      navigate(
+        `/${activeTool}/projects/${result.encodedName}/session/${encodeURIComponent(result.filePath)}`
+      );
     } else {
       navigate(
         `/${activeTool}/projects/${result.encodedName}/session/${result.sessionId}`
@@ -51,12 +55,16 @@ export function SearchPage() {
     if (activeTool === "codex") {
       return result.shortName;
     }
+    if (activeTool === "cursor") {
+      return result.projectName;
+    }
     return result.projectName;
   };
 
   const getRoleLabel = (result: any): string => {
     if (result.role === "user") return "用户";
     if (activeTool === "codex") return "Codex";
+    if (activeTool === "cursor") return "Cursor";
     return "Claude";
   };
 

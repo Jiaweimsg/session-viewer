@@ -1,6 +1,7 @@
 mod claude;
 mod codex;
 mod copilot;
+mod cursor;
 mod opencode;
 mod commands;
 mod shared_models;
