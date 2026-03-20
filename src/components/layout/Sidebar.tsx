@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Palette,
   RefreshCw,
+  ChevronDown,
 } from "lucide-react";
 import { ThemePicker } from "./ThemePicker";
 
@@ -39,6 +40,8 @@ export function Sidebar() {
       return project.id;
     } else if (activeTool === "copilot") {
       return encodeURIComponent(project.cwd);
+    } else if (activeTool === "cursor") {
+      return project.encodedName;
     }
     return project.encodedName;
   };
@@ -50,6 +53,8 @@ export function Sidebar() {
       return project.worktree;
     } else if (activeTool === "copilot") {
       return project.cwd;
+    } else if (activeTool === "cursor") {
+      return project.displayPath;
     }
     return project.displayPath;
   };
@@ -63,43 +68,19 @@ export function Sidebar() {
           Session Viewer
         </h1>
         {/* Tool switcher */}
-        <div className="grid grid-cols-2 mt-3 gap-1">
-          <button
-            onClick={() => handleToolSwitch("claude")}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "claude"
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
+        <div className="relative mt-3">
+          <select
+            value={activeTool}
+            onChange={(e) => handleToolSwitch(e.target.value as ToolType)}
+            className="w-full appearance-none bg-muted text-foreground text-sm font-medium rounded-md px-3 py-2 pr-8 border border-border focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
           >
-            Claude Code
-          </button>
-          <button
-            onClick={() => handleToolSwitch("codex")}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "codex"
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-          >
-            Codex
-          </button>
-          <button
-            onClick={() => handleToolSwitch("opencode")}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "opencode"
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-          >
-            OpenCode
-          </button>
-          <button
-            onClick={() => handleToolSwitch("copilot")}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTool === "copilot"
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-          >
-            Copilot
-          </button>
+            <option value="claude">Claude Code</option>
+            <option value="codex">Codex</option>
+            <option value="opencode">OpenCode</option>
+            <option value="copilot">Copilot</option>
+            <option value="cursor">Cursor</option>
+          </select>
+          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
         </div>
       </div>
 

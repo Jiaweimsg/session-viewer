@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::claude::parser::path_encoder::get_projects_dir;
 use crate::codex::parser::session_scanner::get_sessions_dir;
+use crate::cursor::parser::project_scanner::get_cursor_projects_dir;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FsChangePayload {
@@ -17,8 +18,9 @@ pub struct FsChangePayload {
 pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
     let claude_dir = get_projects_dir();
     let codex_dir = get_sessions_dir();
+    let cursor_dir = get_cursor_projects_dir();
 
-    if claude_dir.is_none() && codex_dir.is_none() {
+    if claude_dir.is_none() && codex_dir.is_none() && cursor_dir.is_none() {
         return Err("Could not find any session directories to watch".to_string());
     }
 
@@ -51,6 +53,15 @@ pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
             }
         }
 
+        // Watch Cursor projects directory if it exists
+        if let Some(ref dir) = cursor_dir {
+            if dir.exists() {
+                if let Err(e) = watcher.watch(dir, RecursiveMode::Recursive) {
+                    eprintln!("Failed to watch Cursor projects directory: {}", e);
+                }
+            }
+        }
+
         for event in rx {
             match event {
                 Ok(event) => {
@@ -63,7 +74,7 @@ pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
 
                     if has_relevant_files {
                         // Determine which tool the change belongs to
-                        let tool = determine_tool(&event.paths, &claude_dir, &codex_dir);
+                        let tool = determine_tool(&event.paths, &claude_dir, &codex_dir, &cursor_dir);
 
                         let paths: Vec<String> = event
                             .paths
@@ -90,6 +101,7 @@ fn determine_tool(
     paths: &[std::path::PathBuf],
     claude_dir: &Option<std::path::PathBuf>,
     codex_dir: &Option<std::path::PathBuf>,
+    cursor_dir: &Option<std::path::PathBuf>,
 ) -> String {
     for path in paths {
         let path_str = path.to_string_lossy();
@@ -101,6 +113,11 @@ fn determine_tool(
         if let Some(ref dir) = codex_dir {
             if path_str.starts_with(&dir.to_string_lossy().to_string()) {
                 return "codex".to_string();
+            }
+        }
+        if let Some(ref dir) = cursor_dir {
+            if path_str.starts_with(&dir.to_string_lossy().to_string()) {
+                return "cursor".to_string();
             }
         }
     }

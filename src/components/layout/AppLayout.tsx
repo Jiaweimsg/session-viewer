@@ -12,7 +12,8 @@ export function AppLayout() {
 
   // Sync URL tool param to store
   useEffect(() => {
-    if (tool && (tool === "claude" || tool === "codex") && tool !== activeTool) {
+    const validTools = ["claude", "codex", "opencode", "copilot", "cursor"];
+    if (tool && validTools.includes(tool) && tool !== activeTool) {
       setActiveTool(tool as ToolType);
     }
   }, [tool]);

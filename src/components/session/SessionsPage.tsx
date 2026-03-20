@@ -34,6 +34,8 @@ export function SessionsPage() {
       ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
       : activeTool === "copilot"
       ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
+      : activeTool === "cursor"
+      ? projects.find((p) => p.encodedName === projectKey)
       : projects.find((p) => p.encodedName === projectKey);
 
   useEffect(() => {
@@ -52,6 +54,8 @@ export function SessionsPage() {
         ? session.cwd
         : activeTool === "copilot"
         ? session.cwd || project?.cwd || null
+        : activeTool === "cursor"
+        ? project?.displayPath || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
     try {
@@ -68,6 +72,8 @@ export function SessionsPage() {
         ? session.cwd
         : activeTool === "copilot"
         ? session.cwd || project?.cwd || null
+        : activeTool === "cursor"
+        ? project?.displayPath || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
     const cmd =
@@ -75,6 +81,8 @@ export function SessionsPage() {
         ? `cd '${workDir}' && codex resume ${session.sessionId}`
         : activeTool === "copilot"
         ? `cd '${workDir}' && copilot --resume=${session.sessionId}`
+        : activeTool === "cursor"
+        ? `open -a Cursor '${workDir}'`
         : `cd '${workDir}' && claude --resume ${session.sessionId}`;
     navigator.clipboard.writeText(cmd).then(() => {
       setCopiedId(session.sessionId);
@@ -88,6 +96,9 @@ export function SessionsPage() {
     }
     if (activeTool === "copilot") {
       return session.sessionId;
+    }
+    if (activeTool === "cursor") {
+      return encodeURIComponent(session.filePath);
     }
     return session.sessionId;
   };
@@ -115,6 +126,8 @@ export function SessionsPage() {
                 ? project.cwd
                 : activeTool === "copilot"
                 ? project.cwd
+                : activeTool === "cursor"
+                ? project.displayPath
                 : project.displayPath}
             </p>
           )}
