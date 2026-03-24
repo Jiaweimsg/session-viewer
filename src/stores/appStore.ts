@@ -31,7 +31,9 @@ interface AppState {
   // Stats
   stats: any;
   tokenSummary: any;
+  advancedStats: any;
   statsLoading: boolean;
+  statsTool: ToolType | null;
 
   // Actions
   setActiveTool: (tool: ToolType) => void;
@@ -68,7 +70,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   stats: null,
   tokenSummary: null,
+  advancedStats: null,
   statsLoading: false,
+  statsTool: null,
 
   setActiveTool: (tool: ToolType) => {
     set({
@@ -89,7 +93,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       searchLoading: false,
       stats: null,
       tokenSummary: null,
+      advancedStats: null,
       statsLoading: false,
+      statsTool: null,
     });
   },
 
@@ -242,14 +248,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadStats: async () => {
-    const tool = get().activeTool;
+    const { activeTool: tool, statsTool } = get();
+    // Skip if already loaded for this tool
+    if (statsTool === tool) return;
     set({ statsLoading: true });
     try {
-      const [stats, tokenSummary] = await Promise.all([
+      const promises: [Promise<any>, Promise<any>, Promise<any>] = [
         api.getStats(tool),
         api.getTokenSummary(tool),
-      ]);
-      set({ stats, tokenSummary, statsLoading: false });
+        tool === "claude" ? api.getAdvancedStats(tool).catch(() => null) : Promise.resolve(null),
+      ];
+      const [stats, tokenSummary, advancedStats] = await Promise.all(promises);
+      set({ stats, tokenSummary, advancedStats, statsLoading: false, statsTool: tool });
     } catch (e) {
       console.error("Failed to load stats:", e);
       set({ statsLoading: false });

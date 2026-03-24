@@ -24,6 +24,7 @@ pub fn run() {
             commands::global_search,
             commands::get_stats,
             commands::get_token_summary,
+            commands::get_advanced_stats,
             commands::resume_session,
         ])
         .setup(|app| {

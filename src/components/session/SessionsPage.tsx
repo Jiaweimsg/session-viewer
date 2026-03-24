@@ -223,6 +223,11 @@ export function SessionsPage() {
                         {format(new Date(session.created), "yyyy-MM-dd HH:mm")}
                       </span>
                     )}
+                    {session.models && session.models.length > 0 && (
+                      <span className="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs font-mono">
+                        {session.models.join(" / ")}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div

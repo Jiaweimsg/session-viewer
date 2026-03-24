@@ -51,6 +51,10 @@ export async function getTokenSummary(tool: ToolType): Promise<any> {
   return invoke("get_token_summary", { tool });
 }
 
+export async function getAdvancedStats(tool: ToolType): Promise<any> {
+  return invoke("get_advanced_stats", { tool });
+}
+
 export async function resumeSession(
   tool: ToolType,
   sessionId: string,

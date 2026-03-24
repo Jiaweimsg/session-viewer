@@ -135,6 +135,22 @@ pub fn parse_all_messages(path: &Path) -> Result<Vec<DisplayMessage>, String> {
     Ok(messages)
 }
 
+/// Prefixes used by Claude Code CLI for system-injected messages (not real user prompts)
+const SYSTEM_PREFIXES: &[&str] = &[
+    "<local-command-caveat>",
+    "<command-name>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<system-reminder>",
+    "<system-status>",
+];
+
+/// Check if a text starts with a system-injected prefix
+fn is_system_message(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    SYSTEM_PREFIXES.iter().any(|prefix| trimmed.starts_with(prefix))
+}
+
 /// Extract the first user prompt from a JSONL file
 pub fn extract_first_prompt(path: &Path) -> Option<String> {
     let file = File::open(path).ok()?;
@@ -160,14 +176,14 @@ pub fn extract_first_prompt(path: &Path) -> Option<String> {
                 if msg.role == "user" {
                     match &msg.content {
                         ContentValue::Text(s) => {
-                            if !s.is_empty() {
+                            if !s.is_empty() && !is_system_message(s) {
                                 return Some(truncate_string(s, 200));
                             }
                         }
                         ContentValue::Blocks(blocks) => {
                             for block in blocks {
                                 if let ContentBlock::Text { text } = block {
-                                    if !text.is_empty() {
+                                    if !text.is_empty() && !is_system_message(text) {
                                         return Some(truncate_string(text, 200));
                                     }
                                 }

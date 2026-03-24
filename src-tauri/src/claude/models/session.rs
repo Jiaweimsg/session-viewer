@@ -23,4 +23,6 @@ pub struct SessionIndexEntry {
     pub git_branch: Option<String>,
     pub project_path: Option<String>,
     pub is_sidechain: Option<bool>,
+    #[serde(default)]
+    pub models: Option<Vec<String>>,
 }

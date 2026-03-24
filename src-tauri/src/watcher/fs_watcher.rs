@@ -1,11 +1,12 @@
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::sync::mpsc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::claude::parser::path_encoder::get_projects_dir;
 use crate::codex::parser::session_scanner::get_sessions_dir;
 use crate::cursor::parser::project_scanner::get_cursor_projects_dir;
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FsChangePayload {
@@ -75,6 +76,11 @@ pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
                     if has_relevant_files {
                         // Determine which tool the change belongs to
                         let tool = determine_tool(&event.paths, &claude_dir, &codex_dir, &cursor_dir);
+
+                        // Invalidate stats cache for the affected tool
+                        if let Some(state) = app_handle.try_state::<AppState>() {
+                            state.invalidate_stats(&tool);
+                        }
 
                         let paths: Vec<String> = event
                             .paths

@@ -1,4 +1,22 @@
 use serde_json::Value;
+use crate::state::AppState;
+
+const STATS_CACHE_TTL_SECS: u64 = 60;
+
+/// Check if cached stats are still valid for a tool
+fn get_cached_stats(state: &AppState, tool: &str) -> Option<(Value, Value, Value)> {
+    let cache = state.stats_cache.lock();
+    if let Some(cached) = cache.get(tool) {
+        if cached.cached_at.elapsed().as_secs() < STATS_CACHE_TTL_SECS {
+            return Some((
+                cached.stats_json.clone(),
+                cached.token_summary_json.clone(),
+                cached.advanced_stats_json.clone(),
+            ));
+        }
+    }
+    None
+}
 
 /// Dispatch command: get_projects
 /// Routes to Claude or Codex based on `tool` parameter.
@@ -166,64 +184,73 @@ pub fn global_search(tool: String, query: String, max_results: usize) -> Result<
 }
 
 /// Dispatch command: get_stats
-/// For Claude: returns StatsCache from stats-cache.json.
-/// For Codex: returns TokenUsageSummary computed from session files.
+/// Uses in-memory cache to avoid re-scanning files on every call.
 #[tauri::command]
-pub fn get_stats(tool: String) -> Result<Value, String> {
-    match tool.as_str() {
-        "claude" => {
-            let result = crate::claude::commands::stats::get_global_stats()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
-        }
-        "codex" => {
-            let result = crate::codex::commands::stats::get_stats()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
-        }
-        "opencode" => {
-            let result = crate::opencode::commands::stats::get_stats()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
-        }
-        "copilot" => {
-            let result = crate::copilot::commands::stats::get_stats()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
-        }
-        "cursor" => {
-            let result = crate::cursor::commands::stats::get_stats()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
-        }
-        _ => Err(format!("Unknown tool: {}", tool)),
+pub fn get_stats(tool: String, state: tauri::State<'_, AppState>) -> Result<Value, String> {
+    if let Some((stats, _, _)) = get_cached_stats(&state, &tool) {
+        return Ok(stats);
     }
+    // Compute and cache all three at once
+    compute_and_cache_stats(&tool, &state)?;
+    let cache = state.stats_cache.lock();
+    Ok(cache.get(&tool).map(|c| c.stats_json.clone()).unwrap_or(Value::Null))
 }
 
 /// Dispatch command: get_token_summary
-/// Only Claude has a separate token summary; Codex uses get_stats which includes token info.
+/// Uses in-memory cache to avoid re-scanning files on every call.
 #[tauri::command]
-pub fn get_token_summary(tool: String) -> Result<Value, String> {
-    match tool.as_str() {
+pub fn get_token_summary(tool: String, state: tauri::State<'_, AppState>) -> Result<Value, String> {
+    if let Some((_, token_summary, _)) = get_cached_stats(&state, &tool) {
+        return Ok(token_summary);
+    }
+    compute_and_cache_stats(&tool, &state)?;
+    let cache = state.stats_cache.lock();
+    Ok(cache.get(&tool).map(|c| c.token_summary_json.clone()).unwrap_or(Value::Null))
+}
+
+/// Compute all stats for a tool and cache them together (single scan)
+fn compute_and_cache_stats(tool: &str, state: &AppState) -> Result<(), String> {
+    let (stats_json, token_json, advanced_json) = match tool {
         "claude" => {
-            let result = crate::claude::commands::stats::get_token_summary()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
+            let stats = crate::claude::commands::stats::get_global_stats()?;
+            let token = crate::claude::commands::stats::get_token_summary()?;
+            let advanced = crate::claude::commands::stats::get_advanced_stats().unwrap_or_default();
+            (
+                serde_json::to_value(stats).map_err(|e| e.to_string())?,
+                serde_json::to_value(token).map_err(|e| e.to_string())?,
+                serde_json::to_value(advanced).map_err(|e| e.to_string())?,
+            )
         }
         "codex" => {
-            // Codex get_stats already includes token breakdown
-            let result = crate::codex::commands::stats::get_stats()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
+            let stats = crate::codex::commands::stats::get_stats()?;
+            let json = serde_json::to_value(stats).map_err(|e| e.to_string())?;
+            (json.clone(), json, Value::Null)
         }
         "opencode" => {
-            // OpenCode also uses get_stats
-            let result = crate::opencode::commands::stats::get_stats()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
+            let stats = crate::opencode::commands::stats::get_stats()?;
+            let json = serde_json::to_value(stats).map_err(|e| e.to_string())?;
+            (json.clone(), json, Value::Null)
         }
         "copilot" => {
-            let result = crate::copilot::commands::stats::get_stats()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
+            let stats = crate::copilot::commands::stats::get_stats()?;
+            let json = serde_json::to_value(stats).map_err(|e| e.to_string())?;
+            (json.clone(), json, Value::Null)
         }
         "cursor" => {
-            let result = crate::cursor::commands::stats::get_stats()?;
-            serde_json::to_value(result).map_err(|e| e.to_string())
+            let stats = crate::cursor::commands::stats::get_stats()?;
+            let json = serde_json::to_value(stats).map_err(|e| e.to_string())?;
+            (json.clone(), json, Value::Null)
         }
-        _ => Err(format!("Unknown tool: {}", tool)),
-    }
+        _ => return Err(format!("Unknown tool: {}", tool)),
+    };
+    let mut cache = state.stats_cache.lock();
+    cache.insert(tool.to_string(), crate::state::CachedStats {
+        stats_json,
+        token_summary_json: token_json,
+        advanced_stats_json: advanced_json,
+        cached_at: std::time::Instant::now(),
+    });
+    Ok(())
 }
 
 /// Dispatch command: resume_session
@@ -239,4 +266,16 @@ pub fn resume_session(tool: String, session_id: String, work_dir: String, file_p
         "cursor" => crate::cursor::commands::terminal::resume_session(session_id, work_dir),
         _ => Err(format!("Unknown tool: {}", tool)),
     }
+}
+
+/// Dispatch command: get_advanced_stats
+/// Uses in-memory cache.
+#[tauri::command]
+pub fn get_advanced_stats(tool: String, state: tauri::State<'_, AppState>) -> Result<Value, String> {
+    if let Some((_, _, advanced)) = get_cached_stats(&state, &tool) {
+        return Ok(advanced);
+    }
+    compute_and_cache_stats(&tool, &state)?;
+    let cache = state.stats_cache.lock();
+    Ok(cache.get(&tool).map(|c| c.advanced_stats_json.clone()).unwrap_or(Value::Null))
 }

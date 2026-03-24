@@ -38,6 +38,18 @@ pub fn get_sessions(encoded_name: String) -> Result<Vec<SessionIndexEntry>, Stri
                 if !index.entries.is_empty() {
                     let mut entries = index.entries;
 
+                    // Enrich entries from index with models data from disk files
+                    for entry in &mut entries {
+                        if entry.models.is_none() {
+                            if let Some(path) = disk_sessions.get(&entry.session_id) {
+                                let models = extract_models(path);
+                                if !models.is_empty() {
+                                    entry.models = Some(models);
+                                }
+                            }
+                        }
+                    }
+
                     // Collect indexed session IDs
                     let indexed_ids: HashSet<String> =
                         entries.iter().map(|e| e.session_id.clone()).collect();
@@ -77,6 +89,7 @@ fn scan_single_session(path: &Path, session_id: &str) -> Option<SessionIndexEntr
     let (_, git_branch, project_path) = metadata.unwrap_or((String::new(), None, None));
 
     let message_count = count_messages(path);
+    let models = extract_models(path);
 
     let file_meta = fs::metadata(path).ok();
     let modified = file_meta.as_ref().and_then(|m| {
@@ -118,6 +131,7 @@ fn scan_single_session(path: &Path, session_id: &str) -> Option<SessionIndexEntr
         git_branch,
         project_path,
         is_sidechain: Some(false),
+        models: if models.is_empty() { None } else { Some(models) },
     })
 }
 
@@ -136,4 +150,38 @@ fn count_messages(path: &Path) -> u32 {
         }
     }
     count
+}
+
+/// Extract unique model names from a session JSONL file
+fn extract_models(path: &Path) -> Vec<String> {
+    use std::io::{BufRead, BufReader};
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+    let reader = BufReader::new(file);
+    let mut models = Vec::new();
+    let mut seen = HashSet::new();
+
+    for line in reader.lines().map_while(Result::ok) {
+        let trimmed = line.trim();
+        if !trimmed.contains("\"type\":\"assistant\"") {
+            continue;
+        }
+        // Quick extract model from the message object
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if let Some(model) = v
+                .get("message")
+                .and_then(|m| m.get("model"))
+                .and_then(|m| m.as_str())
+            {
+                if model != "<synthetic>" && !model.is_empty() && seen.insert(model.to_string()) {
+                    // Shorten: remove "claude-" prefix for display
+                    let short = model.strip_prefix("claude-").unwrap_or(model);
+                    models.push(short.to_string());
+                }
+            }
+        }
+    }
+    models
 }

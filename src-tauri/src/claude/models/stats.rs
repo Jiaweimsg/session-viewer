@@ -62,3 +62,47 @@ pub struct DailyTokenEntry {
     pub output_tokens: u64,
     pub total_tokens: u64,
 }
+
+// ============ Advanced Stats ============
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedStats {
+    pub project_token_ranking: Vec<ProjectTokenEntry>,
+    pub tool_call_ranking: Vec<ToolCallEntry>,
+    #[serde(default)]
+    pub efficiency: SessionEfficiency,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectTokenEntry {
+    pub project_name: String,
+    pub total_tokens: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallEntry {
+    pub tool_name: String,
+    pub call_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEfficiency {
+    pub avg_messages_per_session: f64,
+    pub avg_tokens_per_session: f64,
+    pub total_sessions: u64,
+    pub total_messages: u64,
+    pub distribution: Vec<EfficiencyBucket>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EfficiencyBucket {
+    pub label: String,
+    pub count: u64,
+}

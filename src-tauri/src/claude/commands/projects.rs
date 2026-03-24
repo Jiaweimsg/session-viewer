@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{BufRead, BufReader};
 
 use crate::claude::models::project::Project;
 use crate::claude::models::session::SessionsIndex;
@@ -27,7 +28,10 @@ pub fn get_projects() -> Result<Vec<Project>, String> {
             None => continue,
         };
 
-        let display_path = decode_project_path(&encoded_name);
+        // Try to read the real cwd from session files first (most accurate),
+        // fall back to decoding the encoded directory name
+        let display_path = read_cwd_from_sessions(&path)
+            .unwrap_or_else(|| decode_project_path(&encoded_name));
         let short_name = short_name_from_path(&display_path);
 
         // Use sessions-index.json if available (consistent with get_sessions)
@@ -76,6 +80,52 @@ pub fn get_projects() -> Result<Vec<Project>, String> {
     projects.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
 
     Ok(projects)
+}
+
+/// Read the real cwd path from the first available session JSONL file in a project directory.
+/// This is more accurate than decoding the encoded directory name, which can't handle
+/// hyphens in directory names (e.g. "claude-code-hub" gets decoded as "claude/code/hub").
+fn read_cwd_from_sessions(project_dir: &std::path::Path) -> Option<String> {
+    let dir_entries = fs::read_dir(project_dir).ok()?;
+
+    for entry in dir_entries.flatten() {
+        let file_path = entry.path();
+        if file_path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+            if let Some(cwd) = extract_cwd_from_jsonl(&file_path) {
+                return Some(cwd);
+            }
+        }
+    }
+    None
+}
+
+/// Extract the cwd field from the first few lines of a JSONL file
+fn extract_cwd_from_jsonl(path: &std::path::Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines().take(10) {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() || !trimmed.contains("\"cwd\"") {
+            continue;
+        }
+
+        let v: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
+            if !cwd.is_empty() {
+                return Some(cwd.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn count_jsonl_files(dir: &std::path::Path) -> usize {

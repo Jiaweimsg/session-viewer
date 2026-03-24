@@ -143,6 +143,38 @@ export interface ClaudeTokenSummary {
   dailyTokens: { date: string; inputTokens: number; outputTokens: number; totalTokens: number }[];
 }
 
+// Claude advanced stats
+export interface AdvancedStats {
+  projectTokenRanking: ProjectTokenEntry[];
+  toolCallRanking: ToolCallEntry[];
+  efficiency: SessionEfficiency;
+}
+
+export interface ProjectTokenEntry {
+  projectName: string;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface ToolCallEntry {
+  toolName: string;
+  callCount: number;
+}
+
+export interface SessionEfficiency {
+  avgMessagesPerSession: number;
+  avgTokensPerSession: number;
+  totalSessions: number;
+  totalMessages: number;
+  distribution: EfficiencyBucket[];
+}
+
+export interface EfficiencyBucket {
+  label: string;
+  count: number;
+}
+
 // Codex stats
 export interface CodexTokenSummary {
   totalInputTokens: number;
