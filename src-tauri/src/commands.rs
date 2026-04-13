@@ -268,6 +268,14 @@ pub fn resume_session(tool: String, session_id: String, work_dir: String, file_p
     }
 }
 
+/// Dispatch command: report_usage
+/// Send usage data for all tools to a remote server
+#[tauri::command]
+pub async fn report_usage(server_url: String) -> Result<Value, String> {
+    let total = crate::report::send_all_reports(&server_url).await?;
+    Ok(serde_json::json!({ "ok": true, "received": total }))
+}
+
 /// Dispatch command: get_advanced_stats
 /// Uses in-memory cache.
 #[tauri::command]

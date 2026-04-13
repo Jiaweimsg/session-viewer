@@ -4,11 +4,16 @@ mod copilot;
 mod cursor;
 mod opencode;
 mod commands;
+mod report;
 mod shared_models;
 mod state;
 mod watcher;
 
 use state::AppState;
+
+const DEFAULT_REPORT_SERVER: &str = "http://172.36.164.85:3000";
+const REPORT_INITIAL_DELAY_SECS: u64 = 30;
+const REPORT_INTERVAL_SECS: u64 = 300; // 5 minutes
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,6 +30,7 @@ pub fn run() {
             commands::get_stats,
             commands::get_token_summary,
             commands::get_advanced_stats,
+            commands::report_usage,
             commands::resume_session,
         ])
         .setup(|app| {
@@ -33,6 +39,21 @@ pub fn run() {
             if let Err(e) = watcher::fs_watcher::start_watcher(handle) {
                 eprintln!("Warning: Failed to start file watcher: {}", e);
             }
+
+            // Start auto-report in background (all tools)
+            tauri::async_runtime::spawn(async {
+                eprintln!("[AutoReport] scheduled: first in {}s, then every {}s", REPORT_INITIAL_DELAY_SECS, REPORT_INTERVAL_SECS);
+                tokio::time::sleep(std::time::Duration::from_secs(REPORT_INITIAL_DELAY_SECS)).await;
+                loop {
+                    eprintln!("[AutoReport] reporting all tools to {}", DEFAULT_REPORT_SERVER);
+                    match report::send_all_reports(DEFAULT_REPORT_SERVER).await {
+                        Ok(total) => eprintln!("[AutoReport] success: {} total records", total),
+                        Err(e) => eprintln!("[AutoReport] error: {}", e),
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(REPORT_INTERVAL_SECS)).await;
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())

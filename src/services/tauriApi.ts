@@ -55,6 +55,10 @@ export async function getAdvancedStats(tool: ToolType): Promise<any> {
   return invoke("get_advanced_stats", { tool });
 }
 
+export async function reportUsage(serverUrl: string): Promise<{ ok?: boolean; received?: number; error?: string }> {
+  return invoke("report_usage", { serverUrl });
+}
+
 export async function resumeSession(
   tool: ToolType,
   sessionId: string,

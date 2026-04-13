@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../../stores/appStore";
+import * as api from "../../services/tauriApi";
 import type { StatsCache, ClaudeTokenSummary, CodexTokenSummary, CursorStats as CursorStatsType, AdvancedStats } from "../../types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -24,6 +25,9 @@ import {
   FolderOpen,
   Wrench,
   TrendingUp,
+  Upload,
+  Check,
+  AlertCircle,
 } from "lucide-react";
 
 export function StatsPage() {
@@ -145,7 +149,10 @@ function ClaudeStats({
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">使用统计</h1>
-        <MonthFilter months={months} selected={selectedMonth} onChange={setSelectedMonth} />
+        <div className="flex items-center gap-3">
+          <ReportButton />
+          <MonthFilter months={months} selected={selectedMonth} onChange={setSelectedMonth} />
+        </div>
       </div>
 
       {/* Summary cards */}
@@ -683,6 +690,103 @@ function StatCard({
         <span className="text-xs">{label}</span>
       </div>
       <div className="text-2xl font-bold">{value}</div>
+    </div>
+  );
+}
+
+// ============ Report Button ============
+
+const REPORT_SERVER_KEY = "report_server_url";
+const DEFAULT_REPORT_SERVER = "http://172.36.164.85:3000";
+
+function ReportButton() {
+  const [showConfig, setShowConfig] = useState(false);
+  const [serverUrl, setServerUrl] = useState(() => localStorage.getItem(REPORT_SERVER_KEY) || DEFAULT_REPORT_SERVER);
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  const handleReport = async () => {
+    if (!serverUrl.trim()) {
+      setShowConfig(true);
+      return;
+    }
+    localStorage.setItem(REPORT_SERVER_KEY, serverUrl.trim());
+    setStatus("loading");
+    setMessage("");
+    try {
+      const resp = await api.reportUsage(serverUrl.trim());
+      if (resp.ok) {
+        setStatus("success");
+        setMessage(`上报成功，共 ${resp.received ?? 0} 条记录`);
+        setTimeout(() => { setStatus("idle"); setMessage(""); }, 3000);
+      } else {
+        setStatus("error");
+        setMessage(resp.error || "上报失败");
+        setTimeout(() => { setStatus("idle"); setMessage(""); }, 5000);
+      }
+    } catch (e: any) {
+      setStatus("error");
+      setMessage(e?.toString() || "上报失败");
+      setTimeout(() => { setStatus("idle"); setMessage(""); }, 5000);
+    }
+  };
+
+  return (
+    <div className="relative flex items-center gap-1">
+      <button
+        onClick={handleReport}
+        disabled={status === "loading"}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-border bg-card hover:bg-accent transition-colors disabled:opacity-50"
+        title="上报使用数据到服务端"
+      >
+        {status === "loading" && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+        {status === "success" && <Check className="w-3.5 h-3.5 text-green-500" />}
+        {status === "error" && <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+        {status === "idle" && <Upload className="w-3.5 h-3.5" />}
+        上报
+      </button>
+      <button
+        onClick={() => setShowConfig(!showConfig)}
+        className="p-1.5 text-xs rounded-md border border-border bg-card hover:bg-accent transition-colors text-muted-foreground"
+        title="配置服务端地址"
+      >
+        <Wrench className="w-3 h-3" />
+      </button>
+
+      {message && (
+        <div className={`absolute right-0 top-full mt-1 text-xs whitespace-nowrap px-2 py-1 rounded ${status === "success" ? "text-green-600 bg-green-50" : "text-red-600 bg-red-50"}`}>
+          {message}
+        </div>
+      )}
+
+      {showConfig && (
+        <div className="absolute right-0 top-full mt-2 z-50 bg-card border border-border rounded-lg shadow-lg p-4 w-80">
+          <label className="text-xs text-muted-foreground block mb-1">服务端地址</label>
+          <input
+            type="text"
+            value={serverUrl}
+            onChange={(e) => setServerUrl(e.target.value)}
+            placeholder="http://172.36.164.85:3000"
+            className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background mb-3"
+            autoFocus
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => setShowConfig(false)}
+              className="px-3 py-1 text-xs rounded border border-border hover:bg-accent"
+            >
+              取消
+            </button>
+            <button
+              onClick={() => { localStorage.setItem(REPORT_SERVER_KEY, serverUrl.trim()); setShowConfig(false); }}
+              disabled={!serverUrl.trim()}
+              className="px-3 py-1 text-xs rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
