@@ -22,6 +22,7 @@ pub struct ReportPayload {
     pub user_name: String,
     pub machine_id: String,
     pub tool: String,
+    pub client_version: String,
     pub records: Vec<UsageRecord>,
     pub reported_at: String,
 }
@@ -66,6 +67,11 @@ pub fn get_machine_id() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// Get client version from Cargo.toml at compile time
+fn get_client_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Send a single tool's usage report to the server
 async fn send_tool_report(
     client: &reqwest::Client,
@@ -85,6 +91,7 @@ async fn send_tool_report(
         user_name: name.to_string(),
         machine_id: machine_id.to_string(),
         tool: tool.to_string(),
+        client_version: get_client_version(),
         records,
         reported_at: chrono::Utc::now().to_rfc3339(),
     };

@@ -153,7 +153,7 @@ session-viewer/
          │ 每5分钟自动上报
          ↓
 ┌─────────────────────────────────────────────┐
-│     AI Usage Server (172.36.164.85:3000)     │
+│     AI Usage Server (<server>:3000)           │
 │  Express + TypeScript + better-sqlite3       │
 │  POST /api/report → upsert usage_records     │
 │  Dashboard (public/) → 统计可视化             │
@@ -275,7 +275,7 @@ pub fn get_projects(tool: String) -> Result<Value, String> {
 ### 客户端 (session-viewer)
 
 - **定时任务**: 启动后 30 秒首次上报，之后每 5 分钟
-- **上报地址**: `http://172.36.164.85:3000/api/report`
+- **上报地址**: `http://<server>:3000/api/report`
 - **采集范围**: 所有 5 种工具的使用记录
 - **数据结构**: `{ user_email, user_name, machine_id, tool, records[], reported_at }`
 - **关键文件**: `src-tauri/src/report.rs`, `src-tauri/src/claude/commands/report.rs`
@@ -283,8 +283,8 @@ pub fn get_projects(tool: String) -> Result<Value, String> {
 ### 服务端 (ai-usage-server)
 
 - **项目位置**: `/Users/bin/IdeaProjects/ai-usage-server`
-- **部署地址**: `172.36.164.85:3000`
-- **SSH**: `ssh -p 2234 root@172.36.164.85` (密码: `*****`)
+- **部署地址**: `<server>:3000`
+- **SSH**: 参考内部文档
 - **技术栈**: Express + TypeScript + better-sqlite3, Docker 部署
 - **数据库路径**: `/app/data/usage.db` (SQLite, 挂载卷持久化)
 
@@ -329,7 +329,7 @@ CREATE TABLE accounts (
   must_change_pwd INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
--- 默认账号: admin / admin123 (首次登录需改密)
+-- 默认账号: admin (首次登录需改密)
 ```
 
 #### API 端点
