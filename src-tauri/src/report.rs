@@ -131,6 +131,7 @@ pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
         ("codex", collect_codex_records()),
         ("opencode", collect_opencode_records()),
         ("copilot", collect_copilot_records()),
+        ("cursor", collect_cursor_records()),
     ];
 
     for (tool_name, result) in tools {
@@ -309,6 +310,55 @@ fn collect_copilot_records() -> Result<Vec<UsageRecord>, String> {
             cache_creation_tokens: 0,
             session_count: 1,
             message_count: s.message_count as u64,
+        });
+    }
+
+    Ok(records)
+}
+
+// ── Cursor collection ───────────────────────────────────────
+
+fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
+    use crate::cursor::parser::project_scanner::{
+        read_composer_headers, count_bubbles, epoch_ms_to_rfc3339,
+    };
+
+    let headers = read_composer_headers();
+    if headers.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut records = Vec::new();
+    for h in &headers {
+        let created = match h.created_at {
+            Some(ms) => epoch_ms_to_rfc3339(ms),
+            None => continue,
+        };
+        let date = if created.len() >= 10 {
+            created[..10].to_string()
+        } else {
+            continue;
+        };
+
+        let project = h
+            .workspace_path
+            .as_deref()
+            .and_then(|p| p.rsplit('/').next())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let msg_count = count_bubbles(&h.composer_id) as u64;
+
+        records.push(UsageRecord {
+            date,
+            project,
+            model: "cursor".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            session_count: 1,
+            message_count: msg_count,
         });
     }
 
