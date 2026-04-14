@@ -255,31 +255,31 @@ export interface CopilotStats {
 // ============ Cursor ============
 
 export interface CursorProject {
-  encodedName: string;
-  displayPath: string;
+  cwd: string;
   shortName: string;
   sessionCount: number;
   lastModified: string | null;
+  messageCount: number;
 }
 
 export interface CursorSession {
   sessionId: string;
-  filePath: string;
+  name: string | null;
+  mode: string | null;
   firstPrompt: string | null;
   messageCount: number;
   created: string | null;
   modified: string | null;
+  isArchived: boolean;
 }
 
 export interface CursorSearchResult {
-  encodedName: string;
-  projectName: string;
   sessionId: string;
-  firstPrompt: string | null;
+  projectName: string | null;
+  sessionName: string | null;
   matchedText: string;
   role: string;
   timestamp: string | null;
-  filePath: string;
 }
 
 export interface CursorStats {

@@ -35,7 +35,7 @@ export function SessionsPage() {
       : activeTool === "copilot"
       ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
       : activeTool === "cursor"
-      ? projects.find((p) => p.encodedName === projectKey)
+      ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
       : projects.find((p) => p.encodedName === projectKey);
 
   useEffect(() => {
@@ -55,7 +55,7 @@ export function SessionsPage() {
         : activeTool === "copilot"
         ? session.cwd || project?.cwd || null
         : activeTool === "cursor"
-        ? project?.displayPath || null
+        ? project?.cwd || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
     try {
@@ -73,7 +73,7 @@ export function SessionsPage() {
         : activeTool === "copilot"
         ? session.cwd || project?.cwd || null
         : activeTool === "cursor"
-        ? project?.displayPath || null
+        ? project?.cwd || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
     const cmd =
@@ -98,7 +98,7 @@ export function SessionsPage() {
       return session.sessionId;
     }
     if (activeTool === "cursor") {
-      return encodeURIComponent(session.filePath);
+      return session.sessionId;
     }
     return session.sessionId;
   };
@@ -127,7 +127,7 @@ export function SessionsPage() {
                 : activeTool === "copilot"
                 ? project.cwd
                 : activeTool === "cursor"
-                ? project.displayPath
+                ? project.cwd
                 : project.displayPath}
             </p>
           )}

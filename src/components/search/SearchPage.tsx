@@ -42,7 +42,7 @@ export function SearchPage() {
       );
     } else if (activeTool === "cursor") {
       navigate(
-        `/${activeTool}/projects/${result.encodedName}/session/${encodeURIComponent(result.filePath)}`
+        `/${activeTool}/projects/${encodeURIComponent(result.projectName || '')}/session/${result.sessionId}`
       );
     } else {
       navigate(

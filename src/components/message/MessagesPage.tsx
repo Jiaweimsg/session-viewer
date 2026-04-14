@@ -46,7 +46,7 @@ export function MessagesPage() {
       : activeTool === "copilot"
       ? sessions.find((s) => s.sessionId === sessionKey)
       : activeTool === "cursor"
-      ? sessions.find((s) => encodeURIComponent(s.filePath) === sessionKey)
+      ? sessions.find((s) => s.sessionId === sessionKey)
       : sessions.find((s) => s.sessionId === sessionKey);
 
   const project =
@@ -55,7 +55,7 @@ export function MessagesPage() {
       : activeTool === "copilot"
       ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
       : activeTool === "cursor"
-      ? projects.find((p) => p.encodedName === projectKey)
+      ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
       : projects.find((p) => p.encodedName === projectKey);
 
   useEffect(() => {
@@ -65,7 +65,7 @@ export function MessagesPage() {
       } else if (activeTool === "copilot") {
         selectSession(sessionKey);
       } else if (activeTool === "cursor") {
-        selectSession(decodeURIComponent(sessionKey));
+        selectSession(sessionKey);
       } else {
         selectSession(decodeURIComponent(sessionKey));
       }
@@ -100,7 +100,7 @@ export function MessagesPage() {
       activeTool === "codex"
         ? session?.cwd
         : activeTool === "cursor"
-        ? project?.displayPath
+        ? project?.cwd
         : session?.projectPath || project?.displayPath;
     if (!workDir) return;
     try {
@@ -117,7 +117,7 @@ export function MessagesPage() {
       activeTool === "codex"
         ? session?.cwd
         : activeTool === "cursor"
-        ? project?.displayPath
+        ? project?.cwd
         : session?.projectPath || project?.displayPath;
     if (!workDir) return;
     const cmd =

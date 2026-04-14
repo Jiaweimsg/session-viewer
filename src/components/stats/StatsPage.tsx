@@ -697,7 +697,7 @@ function StatCard({
 // ============ Report Button ============
 
 const REPORT_SERVER_KEY = "report_server_url";
-const DEFAULT_REPORT_SERVER = "";
+const DEFAULT_REPORT_SERVER = "http://172.36.164.85:3000";
 
 function ReportButton() {
   const [showConfig, setShowConfig] = useState(false);
@@ -766,7 +766,7 @@ function ReportButton() {
             type="text"
             value={serverUrl}
             onChange={(e) => setServerUrl(e.target.value)}
-            placeholder="http://your-server:3000"
+            placeholder="http://172.36.164.85:3000"
             className="w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background mb-3"
             autoFocus
           />

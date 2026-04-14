@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::claude::parser::path_encoder::get_projects_dir;
 use crate::codex::parser::session_scanner::get_sessions_dir;
-use crate::cursor::parser::project_scanner::get_cursor_projects_dir;
+use crate::cursor::parser::project_scanner::get_cursor_user_dir;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -19,7 +19,7 @@ pub struct FsChangePayload {
 pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
     let claude_dir = get_projects_dir();
     let codex_dir = get_sessions_dir();
-    let cursor_dir = get_cursor_projects_dir();
+    let cursor_dir = get_cursor_user_dir();
 
     if claude_dir.is_none() && codex_dir.is_none() && cursor_dir.is_none() {
         return Err("Could not find any session directories to watch".to_string());

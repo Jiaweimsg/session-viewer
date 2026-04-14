@@ -41,7 +41,7 @@ export function Sidebar() {
     } else if (activeTool === "copilot") {
       return encodeURIComponent(project.cwd);
     } else if (activeTool === "cursor") {
-      return project.encodedName;
+      return encodeURIComponent(project.cwd);
     }
     return project.encodedName;
   };
@@ -54,7 +54,7 @@ export function Sidebar() {
     } else if (activeTool === "copilot") {
       return project.cwd;
     } else if (activeTool === "cursor") {
-      return project.displayPath;
+      return project.cwd;
     }
     return project.displayPath;
   };

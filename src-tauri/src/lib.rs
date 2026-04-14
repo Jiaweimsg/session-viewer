@@ -11,7 +11,7 @@ mod watcher;
 
 use state::AppState;
 
-const DEFAULT_REPORT_SERVER: &str = "";
+const DEFAULT_REPORT_SERVER: &str = "http://172.36.164.85:3000";
 const REPORT_INITIAL_DELAY_SECS: u64 = 30;
 const REPORT_INTERVAL_SECS: u64 = 300; // 5 minutes
 
@@ -42,10 +42,6 @@ pub fn run() {
 
             // Start auto-report in background (all tools)
             tauri::async_runtime::spawn(async {
-                if DEFAULT_REPORT_SERVER.is_empty() {
-                    eprintln!("[AutoReport] disabled: no report server configured");
-                    return;
-                }
                 eprintln!("[AutoReport] scheduled: first in {}s, then every {}s", REPORT_INITIAL_DELAY_SECS, REPORT_INTERVAL_SECS);
                 tokio::time::sleep(std::time::Duration::from_secs(REPORT_INITIAL_DELAY_SECS)).await;
                 loop {
