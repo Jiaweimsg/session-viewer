@@ -284,7 +284,7 @@ pub fn get_projects(tool: String) -> Result<Value, String> {
 
 - **项目位置**: `/Users/bin/IdeaProjects/ai-usage-server`
 - **部署地址**: `172.36.164.85:3000`
-- **SSH**: `ssh -p 2234 root@172.36.164.85` (密码: `lovesea42`)
+- **SSH**: `ssh -p 2234 root@172.36.164.85` (密码: `*****`)
 - **技术栈**: Express + TypeScript + better-sqlite3, Docker 部署
 - **数据库路径**: `/app/data/usage.db` (SQLite, 挂载卷持久化)
 
