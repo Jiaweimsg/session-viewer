@@ -16,7 +16,8 @@ struct MessagePart {
 }
 
 fn get_part_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|p| p.join(".local/share/opencode/storage/part"))
+    crate::opencode::parser::session_scanner::get_storage_dir()
+        .map(|p| p.join("part"))
 }
 
 fn read_message_parts(message_id: &str) -> Vec<String> {

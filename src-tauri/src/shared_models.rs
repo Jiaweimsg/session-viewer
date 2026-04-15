@@ -1,4 +1,27 @@
 use serde::Serialize;
+use std::path::PathBuf;
+
+/// Extract the last path segment as a short name, handling both '/' and '\' separators.
+/// Returns "unknown" if the path is empty or has no valid file name.
+pub fn basename(path: &str) -> String {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        return "unknown".to_string();
+    }
+    PathBuf::from(trimmed)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            // Fallback: manual split on both separators (handles mixed paths)
+            trimmed
+                .rsplit(['/', '\\'])
+                .next()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("unknown")
+                .to_string()
+        })
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]

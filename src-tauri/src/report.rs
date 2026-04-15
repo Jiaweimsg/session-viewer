@@ -240,7 +240,7 @@ fn collect_opencode_records() -> Result<Vec<UsageRecord>, String> {
 
         let session_id = v.get("id").and_then(|i| i.as_str()).unwrap_or("");
         let project = v.get("worktree").and_then(|w| w.as_str())
-            .map(|p| p.rsplit('/').next().unwrap_or("unknown").to_string())
+            .map(crate::shared_models::basename)
             .unwrap_or_else(|| "unknown".to_string());
 
         // Get date from updatedAt or createdAt
@@ -298,7 +298,7 @@ fn collect_copilot_records() -> Result<Vec<UsageRecord>, String> {
         if date.is_empty() {
             continue;
         }
-        let project = s.cwd.rsplit('/').next().unwrap_or("unknown").to_string();
+        let project = crate::shared_models::basename(&s.cwd);
 
         records.push(UsageRecord {
             date,
@@ -343,9 +343,8 @@ fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
         let project = h
             .workspace_path
             .as_deref()
-            .and_then(|p| p.rsplit('/').next())
-            .unwrap_or("unknown")
-            .to_string();
+            .map(crate::shared_models::basename)
+            .unwrap_or_else(|| "unknown".to_string());
 
         let msg_count = count_bubbles(&h.composer_id) as u64;
 

@@ -1,16 +1,30 @@
 use std::path::PathBuf;
 use std::fs;
 
-/// Get OpenCode storage directory
+/// Get OpenCode storage directory.
+/// Tries XDG-style ~/.local/share/opencode/storage first (Linux/macOS/WSL),
+/// then falls back to the platform data dir (%APPDATA%\opencode\storage on Windows).
 pub fn get_storage_dir() -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
-    let storage_path = home.join(".local/share/opencode/storage");
-    
-    if storage_path.exists() {
-        Some(storage_path)
-    } else {
-        None
+    for candidate in candidate_storage_dirs() {
+        if candidate.exists() {
+            return Some(candidate);
+        }
     }
+    None
+}
+
+fn candidate_storage_dirs() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".local").join("share").join("opencode").join("storage"));
+    }
+    if let Some(data) = dirs::data_dir() {
+        candidates.push(data.join("opencode").join("storage"));
+    }
+    if let Some(data_local) = dirs::data_local_dir() {
+        candidates.push(data_local.join("opencode").join("storage"));
+    }
+    candidates
 }
 
 /// Get project directory

@@ -26,16 +26,20 @@ pub fn decode_project_path(encoded: &str) -> String {
     // And "-Users-zuolan-Desktop-LB" means "/Users/zuolan/Desktop/LB" on Unix
 
     if cfg!(windows) {
-        // On Windows, the pattern is like "C--Users-foo-bar"
-        // First char + '-' is drive letter + ':'
-        // Then each '-' is a path separator
-        if encoded.len() >= 2 && encoded.chars().nth(1) == Some('-') {
+        // Windows drive pattern: "C--Users-foo-bar" where [A-Za-z] + '-' is drive + ':'
+        let first = encoded.chars().next();
+        let is_drive_encoded = encoded.len() >= 2
+            && encoded.chars().nth(1) == Some('-')
+            && first.map(|c| c.is_ascii_alphabetic()).unwrap_or(false);
+
+        if is_drive_encoded {
             let drive = &encoded[0..1];
             let rest = &encoded[2..]; // skip "C-"
             let path_part = rest.replace('-', "\\");
             format!("{}:{}", drive, path_part)
         } else {
-            encoded.replace('-', "\\")
+            // Unix-style encoded path (e.g. WSL: "-mnt-c-proj"). Leading '-' maps to '/'.
+            encoded.replace('-', "/")
         }
     } else {
         // On Unix, pattern is like "-Users-zuolan-Desktop-LB" -> "/Users/zuolan/Desktop/LB"

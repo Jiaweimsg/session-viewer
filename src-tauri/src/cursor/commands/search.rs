@@ -31,8 +31,7 @@ pub fn global_search(query: String, max_results: usize) -> Result<Vec<CursorSear
         let project_name = h
             .workspace_path
             .as_deref()
-            .and_then(|p| p.rsplit('/').next())
-            .map(|s| s.to_string());
+            .map(crate::shared_models::basename);
 
         // Search in session name/subtitle first
         if let Some(ref name) = h.name {
