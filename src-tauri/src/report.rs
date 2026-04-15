@@ -35,28 +35,39 @@ pub struct ReportResponse {
     pub error: Option<String>,
 }
 
-/// Get user email from git config
-pub fn get_git_user_email() -> String {
+/// Read a value from global git config; empty/missing → None.
+fn git_config(key: &str) -> Option<String> {
     std::process::Command::new("git")
-        .args(["config", "--global", "user.email"])
+        .args(["config", "--global", key])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown@localhost".to_string())
 }
 
-/// Get user name from git config
-pub fn get_git_user_name() -> String {
-    std::process::Command::new("git")
-        .args(["config", "--global", "user.name"])
-        .output()
+/// OS login name: $USER (Unix) / $USERNAME (Windows). Falls back to "unknown".
+fn get_os_username() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
         .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_default()
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// User email: git config first (devs), fall back to `{os_user}@{hostname}.local`
+/// so non-dev roles (PM/QA) remain identifiable by machine owner.
+pub fn get_user_email() -> String {
+    if let Some(email) = git_config("user.email") {
+        return email;
+    }
+    format!("{}@{}.local", get_os_username(), get_machine_id())
+}
+
+/// User name: git config first, fall back to OS username.
+pub fn get_user_name() -> String {
+    git_config("user.name").unwrap_or_else(get_os_username)
 }
 
 /// Get machine hostname
@@ -119,8 +130,8 @@ async fn send_tool_report(
 pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
     let url = format!("{}/api/report", server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
-    let email = get_git_user_email();
-    let name = get_git_user_name();
+    let email = get_user_email();
+    let name = get_user_name();
     let machine_id = get_machine_id();
 
     let mut total_received: u64 = 0;
