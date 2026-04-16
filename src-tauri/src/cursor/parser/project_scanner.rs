@@ -49,6 +49,7 @@ pub struct CursorBubble {
     pub text: Option<String>,
     pub created_at: Option<String>,
     pub token_count: Option<TokenCount>,
+    pub model_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -235,6 +236,7 @@ pub fn read_bubbles(composer_id: &str) -> Vec<CursorBubble> {
                     text: None,
                     created_at: None,
                     token_count: None,
+                    model_name: None,
                 });
                 continue;
             }
@@ -255,12 +257,17 @@ pub fn read_bubbles(composer_id: &str) -> Vec<CursorBubble> {
                 output_tokens: output,
             })
         });
+        let model_name = bv.get("modelInfo")
+            .and_then(|mi| mi.get("modelName"))
+            .and_then(|m| m.as_str())
+            .map(|s| s.to_string());
 
         bubbles.push(CursorBubble {
             msg_type,
             text,
             created_at,
             token_count,
+            model_name,
         });
     }
 

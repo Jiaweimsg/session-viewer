@@ -282,8 +282,60 @@ export interface CursorSearchResult {
   timestamp: string | null;
 }
 
+export interface CursorDailyActivity {
+  date: string;
+  messageCount: number;
+  sessionCount: number;
+}
+
+export interface CursorDailyTokenEntry {
+  date: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface CursorModeEntry {
+  mode: string;
+  count: number;
+}
+
+export interface CursorProjectTokenEntry {
+  projectName: string;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessionCount: number;
+  messageCount: number;
+}
+
+export interface CursorSessionEfficiency {
+  avgMessagesPerSession: number;
+  avgTokensPerSession: number;
+  totalSessions: number;
+  totalMessages: number;
+  distribution: { label: string; count: number }[];
+}
+
+export interface CursorModelUsageEntry {
+  model: string;
+  requestCount: number;
+}
+
 export interface CursorStats {
   totalSessions: number;
   totalProjects: number;
   totalMessages: number;
+  totalRequests: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  dailyActivity: CursorDailyActivity[];
+  dailyTokens: CursorDailyTokenEntry[];
+  modeDistribution: CursorModeEntry[];
+  modelUsage: CursorModelUsageEntry[];
+  projectRanking: CursorProjectTokenEntry[];
+  efficiency: CursorSessionEfficiency;
+  activeSessions: number;
+  archivedSessions: number;
 }

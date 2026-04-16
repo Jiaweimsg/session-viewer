@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/tauri/v2/crates/tauri-schema-generator/schemas/config.schema.json",
   "productName": "Session Viewer",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "identifier": "com.bin.session-viewer",
   "build": {
     "frontendDist": "../dist",
