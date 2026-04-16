@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// A single usage record to be sent to the server
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageRecord {
     pub date: String,
     pub project: String,
@@ -83,6 +83,85 @@ fn get_client_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+// ── High-water-mark persistence ────────────────────────────────────
+//
+// Rationale: the local scan is the source of truth at *this moment* only.
+// If the user clears their AI tool's cache, or the tool rotates/compacts
+// old sessions, the next scan will yield smaller numbers than before and
+// a naive upsert on the server would overwrite previously-reported data
+// with lower values. To prevent regression we keep a local high-water-mark
+// per (tool, date, project, model) and always report max(scan, mark).
+
+/// Directory that stores session-viewer's persistent client state.
+fn state_dir() -> Option<std::path::PathBuf> {
+    let base = dirs::data_dir().or_else(dirs::config_dir)?;
+    let dir = base.join("session-viewer");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+fn high_water_file() -> Option<std::path::PathBuf> {
+    state_dir().map(|d| d.join("report-high-water.json"))
+}
+
+/// key = "tool|date|project|model"
+fn hw_key(tool: &str, r: &UsageRecord) -> String {
+    format!("{}|{}|{}|{}", tool, r.date, r.project, r.model)
+}
+
+fn load_high_water() -> HashMap<String, UsageRecord> {
+    let Some(path) = high_water_file() else { return HashMap::new() };
+    let Ok(content) = std::fs::read_to_string(&path) else { return HashMap::new() };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+fn save_high_water(marks: &HashMap<String, UsageRecord>) {
+    let Some(path) = high_water_file() else { return };
+    if let Ok(json) = serde_json::to_string(marks) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
+/// Merge freshly-scanned records against the stored high-water marks.
+/// For each metric we take the max, so reported values never decrease.
+/// Also backfills any date/project/model that existed historically but is
+/// now missing locally (e.g., files deleted) so the server keeps seeing it.
+fn apply_high_water(tool: &str, scanned: Vec<UsageRecord>) -> Vec<UsageRecord> {
+    let mut marks = load_high_water();
+
+    // Merge each scanned record with its mark, updating the mark with the max.
+    let mut merged: HashMap<String, UsageRecord> = HashMap::new();
+    for rec in scanned {
+        let key = hw_key(tool, &rec);
+        let prev = marks.get(&key);
+        let out = UsageRecord {
+            date: rec.date.clone(),
+            project: rec.project.clone(),
+            model: rec.model.clone(),
+            input_tokens: rec.input_tokens.max(prev.map(|p| p.input_tokens).unwrap_or(0)),
+            output_tokens: rec.output_tokens.max(prev.map(|p| p.output_tokens).unwrap_or(0)),
+            cache_read_tokens: rec.cache_read_tokens.max(prev.map(|p| p.cache_read_tokens).unwrap_or(0)),
+            cache_creation_tokens: rec.cache_creation_tokens.max(prev.map(|p| p.cache_creation_tokens).unwrap_or(0)),
+            session_count: rec.session_count.max(prev.map(|p| p.session_count).unwrap_or(0)),
+            message_count: rec.message_count.max(prev.map(|p| p.message_count).unwrap_or(0)),
+        };
+        marks.insert(key.clone(), out.clone());
+        merged.insert(key, out);
+    }
+
+    // Re-emit any historical marks for this tool that didn't appear in this scan,
+    // so the server doesn't see them as "deleted". Other tools' marks are left untouched.
+    let tool_prefix = format!("{}|", tool);
+    for (key, mark) in marks.iter() {
+        if key.starts_with(&tool_prefix) && !merged.contains_key(key) {
+            merged.insert(key.clone(), mark.clone());
+        }
+    }
+
+    save_high_water(&marks);
+    merged.into_values().collect()
+}
+
 /// Send a single tool's usage report to the server
 async fn send_tool_report(
     client: &reqwest::Client,
@@ -147,8 +226,14 @@ pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
 
     for (tool_name, result) in tools {
         match result {
-            Ok(records) if !records.is_empty() => {
-                match send_tool_report(&client, &url, tool_name, records, &email, &name, &machine_id).await {
+            Ok(records) => {
+                // Merge with persisted high-water marks so cache clears /
+                // log rotation can never drive reported values downward.
+                let merged = apply_high_water(tool_name, records);
+                if merged.is_empty() {
+                    continue;
+                }
+                match send_tool_report(&client, &url, tool_name, merged, &email, &name, &machine_id).await {
                     Ok(resp) => {
                         let n = resp.received.unwrap_or(0);
                         eprintln!("[AutoReport] {}: sent {} records", tool_name, n);
@@ -157,7 +242,6 @@ pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
                     Err(e) => eprintln!("[AutoReport] {} error: {}", tool_name, e),
                 }
             }
-            Ok(_) => {} // empty, skip
             Err(e) => eprintln!("[AutoReport] {} collect error: {}", tool_name, e),
         }
     }
@@ -169,23 +253,18 @@ pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
 
 fn collect_codex_records() -> Result<Vec<UsageRecord>, String> {
     use crate::codex::parser::session_scanner::{scan_all_session_files, extract_date_from_path, short_name_from_path};
-    use crate::codex::parser::jsonl::{extract_session_meta, extract_token_info, count_messages};
+    use crate::codex::parser::jsonl::{extract_session_meta, extract_token_deltas, count_messages};
 
     let files = scan_all_session_files();
     if files.is_empty() {
         return Ok(Vec::new());
     }
 
-    // Key: (date, project, model)
+    // Per-day buckets: (date, project, model) -> (input_fresh, output, cached, sessions, messages)
     type AggKey = (String, String, String);
-    let mut agg: HashMap<AggKey, (u64, u64, u64, u64)> = HashMap::new(); // input, output, session, messages
+    let mut agg: HashMap<AggKey, (u64, u64, u64, u64, u64)> = HashMap::new();
 
     for file_path in &files {
-        let date = match extract_date_from_path(file_path) {
-            Some(d) => d,
-            None => continue,
-        };
-
         let meta = extract_session_meta(file_path);
         let project = meta.as_ref()
             .map(|m| short_name_from_path(&m.cwd))
@@ -194,30 +273,51 @@ fn collect_codex_records() -> Result<Vec<UsageRecord>, String> {
             .and_then(|m| m.model_provider.clone())
             .unwrap_or_else(|| "unknown".to_string());
 
-        let (input, output) = match extract_token_info(file_path) {
-            Some(t) => (t.input_tokens, t.output_tokens),
-            None => (0, 0),
-        };
+        let deltas = extract_token_deltas(file_path);
 
+        // Session count: credit to session-file's date (each file = one session).
+        let session_date = extract_date_from_path(file_path);
         let msg_count = count_messages(file_path) as u64;
 
-        let key = (date, project, model);
-        let entry = agg.entry(key).or_insert((0, 0, 0, 0));
-        entry.0 += input;
-        entry.1 += output;
-        entry.2 += 1; // session count
-        entry.3 += msg_count;
+        if deltas.is_empty() {
+            // No token events in this session — still record the session for session/message count.
+            if let Some(date) = session_date {
+                let key = (date, project.clone(), model.clone());
+                let entry = agg.entry(key).or_insert((0, 0, 0, 0, 0));
+                entry.3 += 1;
+                entry.4 += msg_count;
+            }
+            continue;
+        }
+
+        // Token deltas split by per-event timestamp (cross-midnight safe).
+        for d in &deltas {
+            let key = (d.date.clone(), project.clone(), model.clone());
+            let entry = agg.entry(key).or_insert((0, 0, 0, 0, 0));
+            entry.0 += d.input_fresh;
+            entry.1 += d.output;
+            entry.2 += d.cached;
+        }
+
+        // Session + message counts credited to session-file's date.
+        if let Some(date) = session_date {
+            let key = (date, project, model);
+            let entry = agg.entry(key).or_insert((0, 0, 0, 0, 0));
+            entry.3 += 1;
+            entry.4 += msg_count;
+        }
     }
 
-    Ok(agg.into_iter().map(|((date, project, model), (input, output, sessions, messages))| {
+    Ok(agg.into_iter().map(|((date, project, model), (input_fresh, output, cached, sessions, messages))| {
         UsageRecord {
             date,
             project,
             model,
-            input_tokens: input,
+            // Align with Anthropic semantics: input_tokens = fresh (uncached) input only.
+            input_tokens: input_fresh,
             output_tokens: output,
-            cache_read_tokens: 0,
-            cache_creation_tokens: 0,
+            cache_read_tokens: cached,   // Codex cached_input_tokens → cache_read
+            cache_creation_tokens: 0,    // Codex has no cache-creation concept
             session_count: sessions,
             message_count: messages,
         }

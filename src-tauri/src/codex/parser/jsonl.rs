@@ -396,68 +396,176 @@ pub fn count_messages(path: &Path) -> u32 {
     count
 }
 
-/// Extract token counts from event_msg lines
+/// Extract token counts from event_msg lines.
+///
+/// Codex semantics (differ from Anthropic):
+/// - `total_token_usage.input_tokens` is **cumulative session-wide** and
+///   **already includes `cached_input_tokens`** (the cached prefix is counted
+///   inside input_tokens, not as a separate bucket).
+/// - We surface `cached_input_tokens` so callers can split cached vs. fresh
+///   input and align semantics with Anthropic (`input_tokens` = fresh only).
 pub struct TokenInfo {
-    pub input_tokens: u64,
+    pub input_tokens: u64,         // cumulative, includes cached
+    pub cached_input_tokens: u64,  // cumulative cached portion of input_tokens
     pub output_tokens: u64,
     pub total_tokens: u64,
 }
 
+/// Per-day delta computed from adjacent cumulative `total_token_usage` snapshots.
+/// `date` is taken from the event line's own `timestamp`, so a session that
+/// spans midnight splits correctly.
+#[derive(Debug, Clone)]
+pub struct TokenDelta {
+    pub date: String,            // YYYY-MM-DD
+    pub input_fresh: u64,        // input_tokens delta minus cached delta
+    pub cached: u64,             // cached_input_tokens delta
+    pub output: u64,             // output_tokens delta
+}
+
+fn parse_token_usage(info: &Value) -> Option<(u64, u64, u64, u64)> {
+    let usage = info.get("total_token_usage")?;
+    let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+    let cached = usage
+        .get("cached_input_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let output = usage
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let total = usage
+        .get("total_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(input + output);
+    Some((input, cached, output, total))
+}
+
+/// Session-wide cumulative totals (last snapshot wins). Used by stats page.
 pub fn extract_token_info(path: &Path) -> Option<TokenInfo> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
-    let mut last_token_info: Option<TokenInfo> = None;
+    let mut last: Option<TokenInfo> = None;
 
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
+    for line in reader.lines().map_while(Result::ok) {
         let trimmed = line.trim();
         if trimmed.is_empty() || !trimmed.contains("\"token_count\"") {
             continue;
         }
-
         let row: Value = match serde_json::from_str(trimmed) {
             Ok(v) => v,
             Err(_) => continue,
         };
+        if row.get("type").and_then(|v| v.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let payload = match row.get("payload") {
+            Some(p) => p,
+            None => continue,
+        };
+        if payload.get("type").and_then(|v| v.as_str()) != Some("token_count") {
+            continue;
+        }
+        let info = match payload.get("info") {
+            Some(i) => i,
+            None => continue,
+        };
+        if let Some((input, cached, output, total)) = parse_token_usage(info) {
+            last = Some(TokenInfo {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                output_tokens: output,
+                total_tokens: total,
+            });
+        }
+    }
+    last
+}
 
-        let row_type = row.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        if row_type != "event_msg" {
+/// Per-day deltas derived from adjacent cumulative snapshots. Used by reports
+/// so cross-midnight sessions credit each day correctly.
+pub fn extract_token_deltas(path: &Path) -> Vec<TokenDelta> {
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+    let reader = BufReader::new(file);
+
+    // Aggregate deltas by date; keys stay ordered by insertion for predictable output.
+    let mut by_date: std::collections::HashMap<String, (u64, u64, u64)> = std::collections::HashMap::new();
+    let mut prev_input: u64 = 0;
+    let mut prev_cached: u64 = 0;
+    let mut prev_output: u64 = 0;
+
+    for line in reader.lines().map_while(Result::ok) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || !trimmed.contains("\"token_count\"") {
+            continue;
+        }
+        let row: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if row.get("type").and_then(|v| v.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let payload = match row.get("payload") {
+            Some(p) => p,
+            None => continue,
+        };
+        if payload.get("type").and_then(|v| v.as_str()) != Some("token_count") {
+            continue;
+        }
+        let info = match payload.get("info") {
+            Some(i) => i,
+            None => continue,
+        };
+        let (input, cached, output, _total) = match parse_token_usage(info) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        // Cumulative totals should never decrease; if they do (corrupt log),
+        // treat as no-op to avoid negative deltas.
+        let d_input = input.saturating_sub(prev_input);
+        let d_cached = cached.saturating_sub(prev_cached);
+        let d_output = output.saturating_sub(prev_output);
+        if d_input == 0 && d_cached == 0 && d_output == 0 {
+            continue; // duplicate / rate-limit-only re-emit
+        }
+
+        let date = row
+            .get("timestamp")
+            .and_then(|t| t.as_str())
+            .and_then(|ts| ts.get(..10))
+            .unwrap_or("")
+            .to_string();
+        if date.is_empty() {
             continue;
         }
 
-        if let Some(payload) = row.get("payload") {
-            let payload_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            if payload_type != "token_count" {
-                continue;
-            }
+        // input_fresh = total input delta - cached delta, so we never double-count
+        // the cached portion when the server sums input + cache_read.
+        let input_fresh = d_input.saturating_sub(d_cached);
 
-            if let Some(info) = payload.get("info").and_then(|i| i.get("total_token_usage")) {
-                let input = info
-                    .get("input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let output = info
-                    .get("output_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let total = info
-                    .get("total_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(input + output);
+        let entry = by_date.entry(date).or_insert((0, 0, 0));
+        entry.0 += input_fresh;
+        entry.1 += d_cached;
+        entry.2 += d_output;
 
-                last_token_info = Some(TokenInfo {
-                    input_tokens: input,
-                    output_tokens: output,
-                    total_tokens: total,
-                });
-            }
-        }
+        prev_input = input;
+        prev_cached = cached;
+        prev_output = output;
     }
 
-    last_token_info
+    by_date
+        .into_iter()
+        .map(|(date, (input_fresh, cached, output))| TokenDelta {
+            date,
+            input_fresh,
+            cached,
+            output,
+        })
+        .collect()
 }
 
 fn truncate_string(s: &str, max_len: usize) -> String {
