@@ -653,7 +653,7 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-4 mb-8">
         <StatCard
           icon={<Calendar className="w-5 h-5" />}
           label="总会话数"
@@ -666,6 +666,14 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
             ? (stats.totalRequests ?? 0)
             : filteredActivity.reduce((s, d) => s + d.messageCount, 0)
           ).toLocaleString()}
+        />
+        <StatCard
+          icon={<Zap className="w-5 h-5" />}
+          label="估算总请求(含Tab)"
+          value={Math.round((selectedMonth === "all"
+            ? (stats.totalRequests ?? 0)
+            : filteredActivity.reduce((s, d) => s + d.messageCount, 0)
+          ) * 1.8).toLocaleString()}
         />
         <StatCard
           icon={<MessageSquare className="w-5 h-5" />}
