@@ -1,6 +1,6 @@
 [package]
 name = "session-viewer"
-version = "0.4.5"
+version = "0.4.6"
 description = "A desktop app to browse AI agent session records"
 authors = ["wbin"]
 edition = "2021"

@@ -431,7 +431,7 @@ fn collect_copilot_records() -> Result<Vec<UsageRecord>, String> {
 
 fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
     use crate::cursor::parser::project_scanner::{
-        read_composer_headers, count_bubbles, epoch_ms_to_rfc3339,
+        read_composer_headers, read_bubbles, epoch_ms_to_rfc3339,
     };
 
     let headers = read_composer_headers();
@@ -439,7 +439,10 @@ fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
         return Ok(Vec::new());
     }
 
-    let mut records = Vec::new();
+    // Aggregate by (date, project, model)
+    type AggKey = (String, String, String);
+    let mut agg: HashMap<AggKey, (u64, u64, u64, u64)> = HashMap::new(); // (input, output, sessions, messages)
+
     for h in &headers {
         let created = match h.created_at {
             Some(ms) => epoch_ms_to_rfc3339(ms),
@@ -448,7 +451,7 @@ fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
         let date = if created.len() >= 10 {
             created[..10].to_string()
         } else {
-            continue;
+            continue
         };
 
         let project = h
@@ -457,20 +460,51 @@ fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
             .map(crate::shared_models::basename)
             .unwrap_or_else(|| "unknown".to_string());
 
-        let msg_count = count_bubbles(&h.composer_id) as u64;
+        let bubbles = read_bubbles(&h.composer_id);
+        let msg_count = bubbles.len() as u64;
 
-        records.push(UsageRecord {
-            date,
-            project,
-            model: "cursor".to_string(),
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_creation_tokens: 0,
-            session_count: 1,
-            message_count: msg_count,
-        });
+        // Determine model from user messages (type=1), fallback to "cursor"
+        let model = bubbles.iter()
+            .find_map(|b| {
+                if b.msg_type == 1 {
+                    b.model_name.as_deref()
+                        .filter(|m| !m.is_empty())
+                        .map(|m| m.to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "cursor".to_string());
+
+        // Sum tokens from all bubbles
+        let mut input_tokens: u64 = 0;
+        let mut output_tokens: u64 = 0;
+        for b in &bubbles {
+            if let Some(ref tc) = b.token_count {
+                input_tokens += tc.input_tokens;
+                output_tokens += tc.output_tokens;
+            }
+        }
+
+        let key = (date, project, model);
+        let entry = agg.entry(key).or_insert((0, 0, 0, 0));
+        entry.0 += input_tokens;
+        entry.1 += output_tokens;
+        entry.2 += 1;
+        entry.3 += msg_count;
     }
 
-    Ok(records)
+    Ok(agg.into_iter().map(|((date, project, model), (input, output, sessions, messages))| {
+        UsageRecord {
+            date,
+            project,
+            model,
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            session_count: sessions,
+            message_count: messages,
+        }
+    }).collect())
 }
