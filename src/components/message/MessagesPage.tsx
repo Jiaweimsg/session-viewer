@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAppStore } from "../../stores/appStore";
-import { ArrowLeft, Play, Loader2, ArrowDown, Copy, Check } from "lucide-react";
+import { ArrowLeft, Play, Loader2, ArrowDown, Copy, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { MessageThread } from "./MessageThread";
 import { resumeSession } from "../../services/tauriApi";
 
@@ -71,6 +71,49 @@ export function MessagesPage() {
       }
     }
   }, [sessionKey, projectKey]);
+
+  // Prev/next session navigation within the current project (flat tools only)
+  const navEnabled = activeTool !== "opencode";
+  const getNavKey = (s: any): string =>
+    activeTool === "codex" ? encodeURIComponent(s.filePath) : s.sessionId;
+  const matchesCurrent = (s: any): boolean =>
+    activeTool === "codex"
+      ? encodeURIComponent(s.filePath) === sessionKey
+      : s.sessionId === sessionKey;
+
+  const currentIndex = navEnabled ? sessions.findIndex(matchesCurrent) : -1;
+  const prevSession =
+    currentIndex > 0 ? sessions[currentIndex - 1] : null;
+  const nextSession =
+    currentIndex >= 0 && currentIndex < sessions.length - 1
+      ? sessions[currentIndex + 1]
+      : null;
+
+  const gotoSession = useCallback(
+    (s: any) => {
+      navigate(
+        `/${activeTool}/projects/${encodeURIComponent(projectKey!)}/session/${getNavKey(s)}`
+      );
+    },
+    [navigate, activeTool, projectKey]
+  );
+
+  useEffect(() => {
+    if (!navEnabled) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && t.matches('input, textarea, [contenteditable="true"]')) return;
+      if ((window.getSelection()?.toString().length ?? 0) > 0) return;
+      const target = e.key === "ArrowLeft" ? prevSession : nextSession;
+      if (!target) return;
+      e.preventDefault();
+      gotoSession(target);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [navEnabled, prevSession, nextSession, gotoSession]);
 
   const handleScroll = useCallback(() => {
     if (!containerRef.current) return;
@@ -153,7 +196,31 @@ export function MessagesPage() {
             </p>
           </div>
         </div>
-        <div className="shrink-0 flex gap-1">
+        <div className="shrink-0 flex items-center gap-2">
+          {navEnabled && (
+            <div className="inline-flex items-center rounded-md border border-border bg-background overflow-hidden shadow-sm">
+              <button
+                onClick={() => prevSession && gotoSession(prevSession)}
+                disabled={!prevSession}
+                title={prevSession ? "上一条 (←)" : "已到首条"}
+                aria-label="上一条"
+                className="px-2 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+              >
+                <ChevronLeft className="w-4 h-4" strokeWidth={2.5} />
+              </button>
+              <div className="w-px h-4 bg-border" />
+              <button
+                onClick={() => nextSession && gotoSession(nextSession)}
+                disabled={!nextSession}
+                title={nextSession ? "下一条 (→)" : "已到末条"}
+                aria-label="下一条"
+                className="px-2 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+              >
+                <ChevronRight className="w-4 h-4" strokeWidth={2.5} />
+              </button>
+            </div>
+          )}
+          <div className="flex gap-1">
           <button
             onClick={handleResume}
             className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-1"
@@ -172,6 +239,7 @@ export function MessagesPage() {
               <Copy className="w-3 h-3" />
             )}
           </button>
+          </div>
         </div>
       </div>
 
