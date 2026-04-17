@@ -23,13 +23,17 @@ pub fn resume_session(session_id: String, cwd: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let script = format!(
-            "tell application \"Terminal\" to do script \"cd '{}' && codex resume {}\"",
+            "tell application \"Terminal\"\nactivate\ndo script \"cd '{}' && codex resume {}\"\nend tell",
             cwd, session_id
         );
-        Command::new("osascript")
+        let output = Command::new("osascript")
             .args(["-e", &script])
-            .spawn()
-            .map_err(|e| format!("Failed to open terminal: {}", e))?;
+            .output()
+            .map_err(|e| format!("Failed to spawn osascript: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("osascript failed: {}", stderr.trim()));
+        }
     }
 
     #[cfg(target_os = "linux")]

@@ -10,7 +10,7 @@ pub fn resume_session(session_id: String, cwd: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let script = format!(
-            "tell application \"Terminal\" to do script \"cd '{}' && copilot --resume={}\"",
+            "tell application \"Terminal\"\nactivate\ndo script \"cd '{}' && copilot --resume={}\"\nend tell",
             cwd, session_id
         );
         Command::new("osascript")

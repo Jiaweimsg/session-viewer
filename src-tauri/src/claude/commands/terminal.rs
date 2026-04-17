@@ -77,7 +77,7 @@ fn run_in_terminal(project_path: &str, session_id: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let script = format!(
-            "tell application \"Terminal\" to do script \"cd '{}' && claude --resume {}\"",
+            "tell application \"Terminal\"\nactivate\ndo script \"cd '{}' && claude --resume {}\"\nend tell",
             project_path, session_id
         );
         Command::new("osascript")

@@ -208,7 +208,13 @@ async fn send_tool_report(
 /// Send usage reports for ALL tools to the server
 pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
     let url = format!("{}/api/report", server_url.trim_end_matches('/'));
-    let client = reqwest::Client::new();
+    // Bypass system proxies: the report server is on an internal network (172.x)
+    // and macOS GUI apps inherit system proxy settings (e.g. Clash on 127.0.0.1:7890)
+    // which cause 502s even when bypass rules include the internal range.
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
     let email = get_user_email();
     let name = get_user_name();
     let machine_id = get_machine_id();

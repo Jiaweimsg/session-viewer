@@ -23,7 +23,7 @@ pub fn resume_session(session_id: String, work_dir: String) -> Result<(), String
     #[cfg(target_os = "macos")]
     {
         let script = format!(
-            "tell application \"Terminal\" to do script \"cd '{}' && opencode --session {}\"",
+            "tell application \"Terminal\"\nactivate\ndo script \"cd '{}' && opencode --session {}\"\nend tell",
             work_dir, session_id
         );
         Command::new("osascript")
