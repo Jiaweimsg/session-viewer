@@ -1,0 +1,151 @@
+use crate::conversation::{ConversationMessage, MAX_BATCH_BYTES, state::ConversationState};
+use crate::conversation::scanner::PendingMessage;
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+/// Split pending messages into batches where each batch's serialized size
+/// (sum of `serde_json::to_vec(msg).len()`) is <= `max_bytes`. A single message
+/// larger than `max_bytes` becomes its own batch (payload may exceed the limit —
+/// rare, accepted).
+pub fn split_into_batches(pending: Vec<PendingMessage>, max_bytes: usize) -> Vec<Vec<PendingMessage>> {
+    let mut batches: Vec<Vec<PendingMessage>> = Vec::new();
+    let mut current: Vec<PendingMessage> = Vec::new();
+    let mut current_size: usize = 0;
+
+    for p in pending {
+        let size = serde_json::to_vec(&p.message).map(|v| v.len()).unwrap_or(0);
+        if !current.is_empty() && current_size + size > max_bytes {
+            batches.push(std::mem::take(&mut current));
+            current_size = 0;
+        }
+        current.push(p);
+        current_size += size;
+    }
+    if !current.is_empty() {
+        batches.push(current);
+    }
+    batches
+}
+
+/// For a set of messages, return the largest `line_end` seen per source file.
+pub fn max_offsets_by_file(msgs: &[PendingMessage]) -> HashMap<PathBuf, u64> {
+    let mut m: HashMap<PathBuf, u64> = HashMap::new();
+    for p in msgs {
+        let cur = m.entry(p.file.clone()).or_insert(0);
+        if p.line_end > *cur {
+            *cur = p.line_end;
+        }
+    }
+    m
+}
+
+/// Update state in place so that each file's offset advances to the max
+/// line_end observed in `msgs`. Does not persist — caller must call state::save.
+pub fn advance_state(state: &mut ConversationState, msgs: &[PendingMessage]) {
+    for (path, end) in max_offsets_by_file(msgs) {
+        let current = state.offset_for(&path);
+        if end > current {
+            state.set_offset(path, end);
+        }
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use crate::conversation::RoleTag;
+
+    fn mk(uuid: &str, text_size: usize) -> PendingMessage {
+        PendingMessage {
+            file: PathBuf::from("/x.jsonl"),
+            line_end: 0,
+            message: ConversationMessage {
+                uuid: uuid.into(),
+                session_id: "s".into(),
+                parent_uuid: None,
+                timestamp: "2026-04-22T00:00:00Z".into(),
+                project: "p".into(),
+                cwd: "/p".into(),
+                git_branch: None,
+                model: None,
+                role_tag: RoleTag::Followup,
+                text: "x".repeat(text_size),
+            },
+        }
+    }
+
+    #[test]
+    fn empty_input_yields_no_batches() {
+        let batches = split_into_batches(vec![], 1024);
+        assert!(batches.is_empty());
+    }
+
+    #[test]
+    fn everything_fits_in_one_batch() {
+        let pending = vec![mk("a", 100), mk("b", 100)];
+        let batches = split_into_batches(pending, 10_000);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].len(), 2);
+    }
+
+    #[test]
+    fn splits_when_size_exceeds_limit() {
+        let pending = vec![mk("a", 500), mk("b", 500), mk("c", 500)];
+        let batches = split_into_batches(pending, 700);
+        assert_eq!(batches.len(), 3);
+    }
+
+    #[test]
+    fn single_oversized_item_becomes_its_own_batch() {
+        let pending = vec![mk("a", 100), mk("b", 10_000)];
+        let batches = split_into_batches(pending, 1_000);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].len(), 1);
+        assert_eq!(batches[0][0].message.uuid, "a");
+        assert_eq!(batches[1].len(), 1);
+        assert_eq!(batches[1][0].message.uuid, "b");
+    }
+
+    #[test]
+    fn uses_max_batch_bytes_constant() {
+        assert_eq!(MAX_BATCH_BYTES, 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn max_offsets_by_file_picks_highest_per_file() {
+        let msgs = vec![
+            PendingMessage {
+                file: PathBuf::from("/a.jsonl"),
+                line_end: 100,
+                message: mk("a", 1).message,
+            },
+            PendingMessage {
+                file: PathBuf::from("/a.jsonl"),
+                line_end: 200,
+                message: mk("b", 1).message,
+            },
+            PendingMessage {
+                file: PathBuf::from("/b.jsonl"),
+                line_end: 50,
+                message: mk("c", 1).message,
+            },
+        ];
+        let m = max_offsets_by_file(&msgs);
+        assert_eq!(m.get(&PathBuf::from("/a.jsonl")).copied(), Some(200));
+        assert_eq!(m.get(&PathBuf::from("/b.jsonl")).copied(), Some(50));
+    }
+
+    #[test]
+    fn advance_state_updates_offsets() {
+        let mut state = ConversationState::default();
+        let msgs = vec![
+            PendingMessage {
+                file: PathBuf::from("/a.jsonl"),
+                line_end: 999,
+                message: mk("a", 1).message,
+            },
+        ];
+        advance_state(&mut state, &msgs);
+        assert_eq!(state.offset_for(&PathBuf::from("/a.jsonl")), 999);
+    }
+}
