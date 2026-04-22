@@ -5,6 +5,7 @@ mod cursor;
 mod opencode;
 mod commands;
 mod report;
+mod conversation;
 mod shared_models;
 mod state;
 mod watcher;
