@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 
 interface ForceUpdatePayload {
   current: string;
@@ -8,17 +9,38 @@ interface ForceUpdatePayload {
 
 export function ForceUpdateOverlay() {
   const [info, setInfo] = useState<ForceUpdatePayload | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unlistenPromise = listen<ForceUpdatePayload>("force-update", (e) => {
+    const unlistenBlock = listen<ForceUpdatePayload>("force-update", (e) => {
       setInfo(e.payload);
+      setError(null);
+    });
+    const unlistenClear = listen("force-update-cleared", () => {
+      setInfo(null);
+      setError(null);
+      setUpdating(false);
     });
     return () => {
-      unlistenPromise.then((fn) => fn()).catch(() => {});
+      unlistenBlock.then((fn) => fn()).catch(() => {});
+      unlistenClear.then((fn) => fn()).catch(() => {});
     };
   }, []);
 
   if (!info) return null;
+
+  const handleUpdate = async () => {
+    setUpdating(true);
+    setError(null);
+    try {
+      await invoke("start_self_update");
+      // success: the updater will relaunch the app; nothing else to do.
+    } catch (e) {
+      setError(String(e));
+      setUpdating(false);
+    }
+  };
 
   return (
     <div
@@ -52,11 +74,7 @@ export function ForceUpdateOverlay() {
           服务端要求的最低客户端版本为{" "}
           <strong style={{ color: "#6c5ce7" }}>v{info.min_required}</strong>
           ，当前版本{" "}
-          <strong style={{ color: "#e17055" }}>v{info.current}</strong>
-          。请联系管理员获取最新安装包。
-          <br />
-          <br />
-          在升级前，会话浏览功能仍可使用，但使用数据上报已停止。
+          <strong style={{ color: "#e17055" }}>v{info.current}</strong>。
         </p>
         <div
           style={{
@@ -66,10 +84,48 @@ export function ForceUpdateOverlay() {
             background: "#f5f5f7",
             borderRadius: "6px",
             fontFamily: "ui-monospace, monospace",
+            marginBottom: "20px",
           }}
         >
           session-viewer v{info.current} → v{info.min_required}
         </div>
+
+        <button
+          onClick={handleUpdate}
+          disabled={updating}
+          style={{
+            width: "100%",
+            padding: "12px",
+            fontSize: "14px",
+            fontWeight: 600,
+            background: updating ? "#b8b0e8" : "#6c5ce7",
+            color: "#fff",
+            border: "none",
+            borderRadius: "8px",
+            cursor: updating ? "not-allowed" : "pointer",
+            transition: "background 0.2s",
+          }}
+        >
+          {updating ? "正在更新..." : "立即更新"}
+        </button>
+
+        {error && (
+          <div
+            style={{
+              marginTop: "12px",
+              padding: "10px 12px",
+              background: "#fff4e6",
+              border: "1px solid #ffb88a",
+              borderRadius: "6px",
+              fontSize: "12px",
+              color: "#b85400",
+              textAlign: "left",
+              lineHeight: 1.5,
+            }}
+          >
+            {error}
+          </div>
+        )}
       </div>
     </div>
   );

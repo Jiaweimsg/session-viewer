@@ -85,33 +85,46 @@ async fn fetch_and_compare(server_url: &str, current: &str) -> Result<(bool, Str
 
 /// Entry point: kick off a version check, flipping `upload_blocked` and
 /// emitting a Tauri event if the client is too old. Fail-open otherwise.
+/// Edge-triggered: the `force-update` event fires only when we transition
+/// from unblocked → blocked, and `force-update-cleared` on the reverse.
 pub async fn enforce_min_version(
     server_url: &str,
     app: AppHandle,
     upload_blocked: Arc<AtomicBool>,
 ) {
     let current = env!("CARGO_PKG_VERSION").to_string();
+    let was_blocked = upload_blocked.load(Ordering::SeqCst);
     match fetch_and_compare(server_url, &current).await {
         Ok((true, _)) => {
-            // Up to date or no minimum configured.
-            eprintln!("[VersionCheck] OK ({})", current);
+            upload_blocked.store(false, Ordering::SeqCst);
+            if was_blocked {
+                eprintln!(
+                    "[VersionCheck] client v{} now at or above min; unblocking",
+                    current
+                );
+                let _ = app.emit("force-update-cleared", ());
+            } else {
+                eprintln!("[VersionCheck] OK ({})", current);
+            }
         }
         Ok((false, min_required)) => {
-            eprintln!(
-                "[VersionCheck] client v{} < required v{}; blocking uploads",
-                current, min_required
-            );
             upload_blocked.store(true, Ordering::SeqCst);
             let payload = ForceUpdatePayload {
                 current: current.clone(),
-                min_required,
+                min_required: min_required.clone(),
             };
-            if let Err(e) = app.emit("force-update", payload) {
-                eprintln!("[VersionCheck] emit failed: {}", e);
+            if !was_blocked {
+                eprintln!(
+                    "[VersionCheck] client v{} < required v{}; blocking uploads",
+                    current, min_required
+                );
+                if let Err(e) = app.emit("force-update", payload) {
+                    eprintln!("[VersionCheck] emit failed: {}", e);
+                }
             }
         }
         Err(e) => {
-            // Fail-open: don't block on transient failures.
+            // Fail-open: don't flip the flag on transient failures.
             eprintln!("[VersionCheck] skipped (fail-open): {}", e);
         }
     }

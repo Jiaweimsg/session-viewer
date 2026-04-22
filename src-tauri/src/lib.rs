@@ -8,6 +8,7 @@ mod report;
 mod conversation;
 mod shared_models;
 mod state;
+mod updater;
 mod version_check;
 mod watcher;
 
@@ -48,6 +49,7 @@ pub fn run() {
             commands::get_advanced_stats,
             commands::report_usage,
             commands::resume_session,
+            updater::start_self_update,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -57,25 +59,22 @@ pub fn run() {
             }
 
             // Shared "uploads blocked" flag, flipped by version_check when the
-            // server's min_client_version is newer than this build.
+            // server's min_client_version is newer than this build. Version check
+            // runs at the top of every metrics cycle (5 min), self-healing if the
+            // admin lowers the min version while the client stays running.
             let upload_blocked = Arc::new(AtomicBool::new(false));
-
-            // One-shot version check 5s after launch (before first report).
-            let version_handle = handle.clone();
-            let version_flag = upload_blocked.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                let server = report_server();
-                version_check::enforce_min_version(&server, version_handle, version_flag).await;
-            });
 
             // Start auto-report in background (all tools)
             let report_flag = upload_blocked.clone();
+            let report_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
                 let server = report_server();
                 eprintln!("[AutoReport] scheduled: first in {}s, then every {}s", REPORT_INITIAL_DELAY_SECS, REPORT_INTERVAL_SECS);
                 tokio::time::sleep(std::time::Duration::from_secs(REPORT_INITIAL_DELAY_SECS)).await;
                 loop {
+                    // Re-check server's min_client_version each cycle.
+                    version_check::enforce_min_version(&server, report_handle.clone(), report_flag.clone()).await;
+
                     if report_flag.load(Ordering::SeqCst) {
                         eprintln!("[AutoReport] skipped (client version blocked)");
                     } else {
