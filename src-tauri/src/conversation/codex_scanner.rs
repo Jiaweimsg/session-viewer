@@ -35,6 +35,36 @@ fn is_context_block(text: &str) -> bool {
     tag.chars().all(|c| c.is_ascii_lowercase() || c == '_')
 }
 
+/// Matches Codex's ALL-CAPS XML-style injection tags like `<INSTRUCTIONS>`,
+/// `<SYSTEM>`, etc. Appear at the very start of a role=user message whose
+/// content is actually a project-wide instruction preamble.
+fn is_allcaps_tag_start(text: &str) -> bool {
+    let t = text.trim_start();
+    let Some(rest) = t.strip_prefix('<') else {
+        return false;
+    };
+    let Some(end) = rest.find('>') else {
+        return false;
+    };
+    let tag = &rest[..end];
+    if tag.is_empty() {
+        return false;
+    }
+    tag.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+}
+
+/// Matches Codex's Markdown AGENTS.md preamble, e.g.
+/// `# AGENTS.md instructions for /Users/bin\n\n<INSTRUCTIONS>\n...`.
+fn is_agents_md_preamble(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with("# AGENTS.md") || t.starts_with("# AGENT.md")
+}
+
+/// Combined check: is this Codex-injected boilerplate (not a real user prompt)?
+fn is_system_injection(text: &str) -> bool {
+    is_context_block(text) || is_allcaps_tag_start(text) || is_agents_md_preamble(text)
+}
+
 /// Extract plain text from a Codex `response_item` row IF it's a real user prompt.
 /// Returns None for role=system/developer, context-block injections, or empty text.
 pub fn extract_codex_user_text(v: &Value) -> Option<String> {
@@ -79,7 +109,7 @@ pub fn extract_codex_user_text(v: &Value) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    if is_context_block(trimmed) {
+    if is_system_injection(trimmed) {
         return None;
     }
     Some(text)
@@ -248,9 +278,47 @@ mod tests {
     fn is_context_block_rejects_regular_text() {
         assert!(!is_context_block("hello <environment_context> friend")); // not first
         assert!(!is_context_block("<html>not context"));
-        assert!(!is_context_block("<ENV_CONTEXT>")); // not lowercase
+        assert!(!is_context_block("<ENV_CONTEXT>")); // not lowercase (handled by allcaps check instead)
         assert!(!is_context_block("regular text"));
         assert!(!is_context_block(""));
+    }
+
+    #[test]
+    fn is_allcaps_tag_start_matches() {
+        assert!(is_allcaps_tag_start("<INSTRUCTIONS>\n# rules"));
+        assert!(is_allcaps_tag_start("<SYSTEM>x</SYSTEM>"));
+        assert!(is_allcaps_tag_start("   <NOTES>preamble"));
+    }
+
+    #[test]
+    fn is_allcaps_tag_start_rejects() {
+        assert!(!is_allcaps_tag_start("<lowercase>"));
+        assert!(!is_allcaps_tag_start("not a tag"));
+        assert!(!is_allcaps_tag_start("<>"));
+        assert!(!is_allcaps_tag_start("<Mixed>"));
+    }
+
+    #[test]
+    fn is_agents_md_preamble_matches() {
+        assert!(is_agents_md_preamble("# AGENTS.md instructions for /Users/bin"));
+        assert!(is_agents_md_preamble("   # AGENTS.md\n"));
+        assert!(is_agents_md_preamble("# AGENT.md preamble"));
+    }
+
+    #[test]
+    fn is_agents_md_preamble_rejects() {
+        assert!(!is_agents_md_preamble("# random heading"));
+        assert!(!is_agents_md_preamble("help me with AGENTS.md"));
+        assert!(!is_agents_md_preamble(""));
+    }
+
+    #[test]
+    fn is_system_injection_combines_all_checks() {
+        assert!(is_system_injection("<environment_context>..."));
+        assert!(is_system_injection("<INSTRUCTIONS>..."));
+        assert!(is_system_injection("# AGENTS.md instructions for /x"));
+        assert!(!is_system_injection("how do I write an AGENTS.md?"));
+        assert!(!is_system_injection("real question"));
     }
 
     #[test]
