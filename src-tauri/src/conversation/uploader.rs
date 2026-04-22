@@ -156,46 +156,62 @@ fn log_dead_letter(batch: &[PendingMessage], err: &str) {
     let _ = writeln!(f, "{} error={} count={} uuids={:?}", ts, err, batch.len(), uuids);
 }
 
-/// Scan all Claude projects and upload pending messages in 10MB batches.
+/// Scan all configured tools' sessions and upload pending messages in 10MB batches.
 /// Advances per-file offsets only for batches that succeed or 4xx (to avoid
 /// death loops). On 5xx/network errors, stops and leaves remaining work for
 /// the next cycle.
-pub async fn flush(server_url: &str) -> Result<u64, String> {
+///
+/// `tools` is iterated sequentially; state is loaded once and shared across
+/// tools (Claude and Codex file paths never collide, so no partitioning is
+/// needed).
+pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
     let url = format!("{}/api/conversations", server_url.trim_end_matches('/'));
     let client = reqwest::Client::builder()
         .no_proxy()
         .build()
         .map_err(|e| format!("client build: {}", e))?;
 
-    let mut state_snapshot = state::load();
-    let pending = scanner::scan_all(&state_snapshot);
-    if pending.is_empty() {
-        return Ok(0);
-    }
-
     let email = crate::report::get_user_email();
     let name = crate::report::get_user_name();
     let machine = crate::report::get_machine_id();
 
+    let mut state_snapshot = state::load();
     let mut total: u64 = 0;
-    for batch in split_into_batches(pending, MAX_BATCH_BYTES) {
-        match send_batch(&client, &url, "claude_code", &email, &name, &machine, &batch).await {
-            Ok(n) => {
-                advance_state(&mut state_snapshot, &batch);
-                state_snapshot.last_scan_at = Some(chrono::Utc::now().to_rfc3339());
-                state::save(&state_snapshot);
-                total += n;
-                eprintln!("[Conversation] uploaded {} messages", n);
+    for &tool in tools {
+        let pending = match tool {
+            "claude_code" => scanner::scan_all(&state_snapshot),
+            "codex" => crate::conversation::codex_scanner::scan_all(&state_snapshot),
+            other => {
+                eprintln!("[Conversation] unknown tool '{}', skipping", other);
+                continue;
             }
-            Err(UploadError::ClientError(e)) => {
-                log_dead_letter(&batch, &e);
-                advance_state(&mut state_snapshot, &batch);
-                state::save(&state_snapshot);
-                eprintln!("[Conversation] 4xx (dead-lettered): {}", e);
-            }
-            Err(UploadError::Transient(e)) => {
-                eprintln!("[Conversation] transient error, will retry next cycle: {}", e);
-                return Err(e);
+        };
+        if pending.is_empty() {
+            continue;
+        }
+
+        for batch in split_into_batches(pending, MAX_BATCH_BYTES) {
+            match send_batch(&client, &url, tool, &email, &name, &machine, &batch).await {
+                Ok(n) => {
+                    advance_state(&mut state_snapshot, &batch);
+                    state_snapshot.last_scan_at = Some(chrono::Utc::now().to_rfc3339());
+                    state::save(&state_snapshot);
+                    total += n;
+                    eprintln!("[Conversation/{}] uploaded {} messages", tool, n);
+                }
+                Err(UploadError::ClientError(e)) => {
+                    log_dead_letter(&batch, &e);
+                    advance_state(&mut state_snapshot, &batch);
+                    state::save(&state_snapshot);
+                    eprintln!("[Conversation/{}] 4xx (dead-lettered): {}", tool, e);
+                }
+                Err(UploadError::Transient(e)) => {
+                    eprintln!(
+                        "[Conversation/{}] transient error, will retry next cycle: {}",
+                        tool, e
+                    );
+                    return Err(e);
+                }
             }
         }
     }
