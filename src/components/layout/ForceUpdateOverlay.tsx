@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-shell";
 
 interface ForceUpdatePayload {
   current: string;
   min_required: string;
 }
 
+const RELEASES_URL = "https://github.com/Jiaweimsg/session-viewer/releases";
+
 export function ForceUpdateOverlay() {
   const [info, setInfo] = useState<ForceUpdatePayload | null>(null);
-  const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -20,7 +21,6 @@ export function ForceUpdateOverlay() {
     const unlistenClear = listen("force-update-cleared", () => {
       setInfo(null);
       setError(null);
-      setUpdating(false);
     });
     return () => {
       unlistenBlock.then((fn) => fn()).catch(() => {});
@@ -31,14 +31,11 @@ export function ForceUpdateOverlay() {
   if (!info) return null;
 
   const handleUpdate = async () => {
-    setUpdating(true);
     setError(null);
     try {
-      await invoke("start_self_update");
-      // success: the updater will relaunch the app; nothing else to do.
+      await open(RELEASES_URL);
     } catch (e) {
-      setError(String(e));
-      setUpdating(false);
+      setError(`打开浏览器失败：${e}。请手动访问 ${RELEASES_URL}`);
     }
   };
 
@@ -92,21 +89,20 @@ export function ForceUpdateOverlay() {
 
         <button
           onClick={handleUpdate}
-          disabled={updating}
           style={{
             width: "100%",
             padding: "12px",
             fontSize: "14px",
             fontWeight: 600,
-            background: updating ? "#b8b0e8" : "#6c5ce7",
+            background: "#6c5ce7",
             color: "#fff",
             border: "none",
             borderRadius: "8px",
-            cursor: updating ? "not-allowed" : "pointer",
+            cursor: "pointer",
             transition: "background 0.2s",
           }}
         >
-          {updating ? "正在更新..." : "立即更新"}
+          立即更新
         </button>
 
         {error && (
@@ -121,6 +117,7 @@ export function ForceUpdateOverlay() {
               color: "#b85400",
               textAlign: "left",
               lineHeight: 1.5,
+              wordBreak: "break-all",
             }}
           >
             {error}

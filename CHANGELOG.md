@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.4] - 2026-04-22
+
+### Changed
+- 简化强制更新流程：放弃完整的 Tauri updater 方案（免去签名密钥管理与 CI 集成）。ForceUpdateOverlay 的"立即更新"按钮现在只是用系统浏览器打开 GitHub Releases 页面 (`https://github.com/Jiaweimsg/session-viewer/releases`)，由用户手动下载并安装新版本
+- 版本检查改为每个 metrics cycle（5 分钟）复跑一次，边沿触发 `force-update` / `force-update-cleared` 事件；fail-open 时保持原状态
+- 回退了 Phase N 期间引入的 `tauri-plugin-updater` / `@tauri-apps/plugin-updater` 依赖、`src-tauri/src/updater.rs` stub、`tauri.conf.json` updater 配置、capabilities 里的 updater 权限、服务端 `/api/updater/manifest.json` 路由与 `/releases/*` 静态托管、auth 白名单相关条目、以及 release.yml 里的签名 env 变量
+
 ## [0.5.3] - 2026-04-22
 
 ### Added

@@ -8,7 +8,6 @@ mod report;
 mod conversation;
 mod shared_models;
 mod state;
-mod updater;
 mod version_check;
 mod watcher;
 
@@ -49,7 +48,6 @@ pub fn run() {
             commands::get_advanced_stats,
             commands::report_usage,
             commands::resume_session,
-            updater::start_self_update,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
