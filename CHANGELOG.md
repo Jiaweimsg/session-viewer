@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-04-22
+
+### Added
+
+#### Claude Code 用户 Prompt 采集
+- 后台扫描 `~/.claude/projects/**/*.jsonl`，按文件字节 offset 增量抽取 user prompt，上传至 `ai-usage-server` 的 `/api/conversations` 端点
+- 独立于现有用量指标上报循环：启动 60s 后首发，之后每 5 分钟
+- 10MB 分批、断点续传；状态文件 `{data_dir}/session-viewer/conversation-state.json`
+- 过滤 6 类 CLI 注入消息（`<system-reminder>` / `<command-name>` 等）与 `tool_result`
+- 启发式 `first` / `followup` / `retry` 标签；模型从紧跟的 assistant 消息回填
+- 服务端纯文件存储（NDJSON），保留 90 天后自动清理，无需数据库
+
+#### Dashboard 查看问题入口
+- "项目用量明细"新增"操作"列；`claude_code` 行显示"查看问题"按钮，其他工具占位
+- 右侧抽屉展示对应 (date × project × model) 的 prompt 明细
+- 支持文本搜索与"仅首问"过滤；长 prompt 折叠，点击展开；ESC 关闭
+
+---
+
 ## [0.2.0] - 2026-02-07
 
 ### Fixed

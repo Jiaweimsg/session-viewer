@@ -357,6 +357,33 @@ EXPOSE 3000
 CMD ["node", "dist/index.js"]
 ```
 
+## 用户 Prompt 采集 (Conversation)
+
+> 添加于 0.5.0。独立于 `/api/report` 指标上报。
+
+### 客户端
+- 模块: `src-tauri/src/conversation/{mod,state,scanner,uploader}.rs`
+- 触发: `lib.rs` spawn，启动 60s 后首发，之后每 5 分钟
+- 覆盖: **仅 Claude Code**（MVP）。服务端路由与 Dashboard 已预留多工具扩展点
+- 幂等键: Claude `message_uuid`；水位线为 `{file_path: byte_offset}` 存于 `{data_dir}/session-viewer/conversation-state.json`
+- 过滤: 6 类 CLI 注入前缀、tool_result、空白
+- 标签: `first` / `followup` / `retry`（增量扫 offset>0 时不再发 `first`）
+- 批次: 10MB 上限，断点续传；4xx 写 dead-letter log 并推进 offset 避免死循环；5xx 下轮重试
+- HTTP: 复用 `no_proxy()` 客户端（同 report.rs，绕过系统代理）
+
+### 服务端
+- 路由: `src/conversations.ts`
+  - `POST /api/conversations` — 在 `auth.ts` 白名单中，接收上报
+  - `GET /api/conversations/detail` — 走全局 JWT 中间件，供 Dashboard 调用
+- 存储: `/app/data/conversations/{tool}/{YYYY-MM-DD}/{sanitize(email)}.jsonl`
+- TTL: `src/cleanup.ts` 启动后 30s 首跑，此后每 6h，按目录名字符串比较删除 90 天前目录
+- 体积估算: 10 人 × 5MB/天 × 90 天 ≈ 4.5GB，建议磁盘 ≥ 20GB
+
+### Dashboard
+- `public/index.html` "项目用量明细"新增"操作"列 → 右侧抽屉
+- 仅 `claude_code` 行显示按钮；其他工具灰置 `—`
+- 抽屉支持文本搜索 + "仅首问"过滤 + 长 prompt 折叠 + ESC 关闭
+
 ## 关键数据流
 
 ### 统计数据加载
