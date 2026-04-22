@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.2] - 2026-04-22
+
+### Added
+
+#### Cursor Prompt 采集
+- conversation collection 扩展到 Cursor，读 `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (SQLite)
+- 幂等键 = `{composer_id}_{sha256(text)[:16]}`（Cursor bubble 无原生 uuid）
+- Per-composer 水位线 `CursorMark { last_updated_at, bubble_index }`（SQLite 不是 append-only，byte offset 不适用）
+- Model 回填：user bubble `model_name` 为空时，回溯找最近一条有 model 的 bubble
+- 系统注入过滤复用 codex 的 `is_system_injection`（`<snake_tag>` / `<ALLCAPS>` / `# AGENTS.md`）
+- `lib.rs` flush 传 `&["claude_code", "codex", "cursor"]`
+- 新增 `sha2` 依赖
+
+#### Dashboard
+- "查看问题"按钮启用条件扩到 `['claude_code', 'codex', 'cursor']`
+- Codex + Cursor 场景抽屉跳过 model 过滤（metrics↔conversation 的 model 字段语义不一致，长期应在 scanner 对齐）
+
+### Fixed
+- `codex_scanner` 把窄的 `<xxx_context>` 过滤规则推广到 lowercase snake_case tag（含下划线，避免误伤 `<div>` 等 HTML）→ 捕获 `<turn_aborted>` 等
+- 新增 `<INSTRUCTIONS>` 类全大写 tag 和 `# AGENTS.md` Markdown 前缀的过滤
+
 ## [0.5.1] - 2026-04-22
 
 ### Added
