@@ -181,6 +181,7 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
         let pending = match tool {
             "claude_code" => scanner::scan_all(&state_snapshot),
             "codex" => crate::conversation::codex_scanner::scan_all(&state_snapshot),
+            "cursor" => crate::conversation::cursor_scanner::scan_all(&state_snapshot),
             other => {
                 eprintln!("[Conversation] unknown tool '{}', skipping", other);
                 continue;
@@ -193,7 +194,10 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
         for batch in split_into_batches(pending, MAX_BATCH_BYTES) {
             match send_batch(&client, &url, tool, &email, &name, &machine, &batch).await {
                 Ok(n) => {
-                    advance_state(&mut state_snapshot, &batch);
+                    match tool {
+                        "cursor" => crate::conversation::cursor_scanner::advance_marks(&mut state_snapshot.cursor_marks, &batch),
+                        _ => advance_state(&mut state_snapshot, &batch),
+                    }
                     state_snapshot.last_scan_at = Some(chrono::Utc::now().to_rfc3339());
                     state::save(&state_snapshot);
                     total += n;
@@ -201,7 +205,10 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
                 }
                 Err(UploadError::ClientError(e)) => {
                     log_dead_letter(&batch, &e);
-                    advance_state(&mut state_snapshot, &batch);
+                    match tool {
+                        "cursor" => crate::conversation::cursor_scanner::advance_marks(&mut state_snapshot.cursor_marks, &batch),
+                        _ => advance_state(&mut state_snapshot, &batch),
+                    }
                     state::save(&state_snapshot);
                     eprintln!("[Conversation/{}] 4xx (dead-lettered): {}", tool, e);
                 }

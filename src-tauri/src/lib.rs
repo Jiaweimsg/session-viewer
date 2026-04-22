@@ -81,7 +81,7 @@ pub fn run() {
                 .await;
                 loop {
                     eprintln!("[Conversation] scanning + uploading to {}", server);
-                    match conversation::uploader::flush(&server, &["claude_code", "codex"]).await {
+                    match conversation::uploader::flush(&server, &["claude_code", "codex", "cursor"]).await {
                         Ok(n) => eprintln!("[Conversation] cycle ok: {} messages", n),
                         Err(e) => eprintln!("[Conversation] cycle failed: {}", e),
                     }
