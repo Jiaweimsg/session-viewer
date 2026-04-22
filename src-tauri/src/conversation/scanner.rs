@@ -1,5 +1,9 @@
 use crate::conversation::RoleTag;
+use crate::conversation::{ConversationMessage, state::ConversationState};
 use serde_json::Value;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 
 /// 6 CLI-injected prefixes that mark a "user" message as NOT a real user prompt.
 pub(crate) const SYSTEM_PREFIXES: &[&str] = &[
@@ -110,6 +114,137 @@ pub fn lookup_following_model(window: &[Value]) -> Option<String> {
         return Some(model.to_string());
     }
     None
+}
+
+/// A scanned message annotated with its source file and the byte offset
+/// *after* its line (i.e., where the next line would start). Used to advance
+/// per-file high-water marks only after the containing batch succeeds.
+#[derive(Debug, Clone)]
+pub struct PendingMessage {
+    pub file: PathBuf,
+    pub line_end: u64,
+    pub message: ConversationMessage,
+}
+
+/// Scan a single jsonl file from `start_offset` to EOF, returning all
+/// user-prompt messages in the window.
+pub fn scan_one_file(
+    path: &Path,
+    start_offset: u64,
+    file_size: u64,
+) -> std::io::Result<Vec<PendingMessage>> {
+    // Defensive: if offset exceeds size (file truncated/rotated), rescan from 0.
+    let start_offset = if start_offset > file_size { 0 } else { start_offset };
+    let is_fresh_scan = start_offset == 0;
+
+    let mut file = File::open(path)?;
+    file.seek(SeekFrom::Start(start_offset))?;
+    let mut reader = BufReader::new(file);
+
+    // First pass: read lines with their post-line byte offset.
+    let mut lines: Vec<(u64, Value)> = Vec::new();
+    let mut cursor = start_offset;
+    loop {
+        let mut buf = String::new();
+        let n = reader.read_line(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        cursor += n as u64;
+        let trimmed = buf.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+            lines.push((cursor, v));
+        }
+    }
+
+    // Second pass: project metadata from cwd, tag + model backfill.
+    let mut first_emitted = false;
+    let mut results = Vec::new();
+    for (i, (line_end, v)) in lines.iter().enumerate() {
+        let Some(text) = extract_user_text(v) else { continue };
+
+        let uuid = v.get("uuid").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        if uuid.is_empty() {
+            continue;
+        }
+        let session_id = v.get("sessionId").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let parent_uuid = v.get("parentUuid").and_then(|x| x.as_str()).map(String::from);
+        let timestamp = v.get("timestamp").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let cwd = v.get("cwd").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let git_branch = v.get("gitBranch").and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let project = cwd.rsplit('/').find(|s| !s.is_empty()).unwrap_or("unknown").to_string();
+
+        let tail: Vec<Value> = lines[i + 1..].iter().map(|(_, v)| v.clone()).collect();
+        let model = lookup_following_model(&tail);
+
+        let is_first_in_window = !first_emitted;
+        let role_tag = classify_role_tag(&text, is_first_in_window, is_fresh_scan);
+        if role_tag == RoleTag::First {
+            first_emitted = true;
+        }
+
+        results.push(PendingMessage {
+            file: path.to_path_buf(),
+            line_end: *line_end,
+            message: ConversationMessage {
+                uuid,
+                session_id,
+                parent_uuid,
+                timestamp,
+                project,
+                cwd,
+                git_branch,
+                model,
+                role_tag,
+                text,
+            },
+        });
+    }
+
+    Ok(results)
+}
+
+/// Walk `~/.claude/projects/**/*.jsonl` and scan each incrementally.
+pub fn scan_all(state: &ConversationState) -> Vec<PendingMessage> {
+    let Some(projects_dir) = crate::claude::parser::path_encoder::get_projects_dir() else {
+        return Vec::new();
+    };
+    if !projects_dir.exists() {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(&projects_dir) else { return Vec::new() };
+
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let project_dir = entry.path();
+        if !project_dir.is_dir() {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(&project_dir) else { continue };
+        for f in files.flatten() {
+            let p = f.path();
+            if p.extension().map(|e| e == "jsonl").unwrap_or(false) {
+                let start = state.offset_for(&p);
+                let Ok(meta) = std::fs::metadata(&p) else { continue };
+                let size = meta.len();
+                if start >= size {
+                    // Nothing new; skip without opening the file.
+                    continue;
+                }
+                match scan_one_file(&p, start, size) {
+                    Ok(mut v) => out.append(&mut v),
+                    Err(e) => eprintln!("[Conversation] scan failed for {:?}: {}", p, e),
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -276,5 +411,88 @@ mod model_tests {
             json!({"type": "assistant", "message": {"model": "<synthetic>"}}),
         ];
         assert_eq!(lookup_following_model(&w), None);
+    }
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn write_jsonl(lines: &[&str]) -> NamedTempFile {
+        let mut f = NamedTempFile::new().unwrap();
+        for l in lines {
+            writeln!(f, "{}", l).unwrap();
+        }
+        f.flush().unwrap();
+        f
+    }
+
+    #[test]
+    fn fresh_scan_marks_first() {
+        let f = write_jsonl(&[
+            r#"{"type":"user","uuid":"u1","sessionId":"s1","timestamp":"2026-04-22T00:00:00Z","cwd":"/a/b/proj","message":{"content":"hello"}}"#,
+            r#"{"type":"assistant","uuid":"a1","message":{"model":"claude-opus-4-6"}}"#,
+            r#"{"type":"user","uuid":"u2","sessionId":"s1","timestamp":"2026-04-22T00:01:00Z","cwd":"/a/b/proj","message":{"content":"more"}}"#,
+        ]);
+        let size = std::fs::metadata(f.path()).unwrap().len();
+        let result = scan_one_file(f.path(), 0, size).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].message.role_tag, RoleTag::First);
+        assert_eq!(result[0].message.project, "proj");
+        assert_eq!(result[0].message.model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(result[1].message.role_tag, RoleTag::Followup);
+    }
+
+    #[test]
+    fn incremental_scan_no_first() {
+        let f = write_jsonl(&[
+            r#"{"type":"user","uuid":"u1","sessionId":"s1","timestamp":"2026-04-22T00:00:00Z","cwd":"/a/b/proj","message":{"content":"hello"}}"#,
+            r#"{"type":"user","uuid":"u2","sessionId":"s1","timestamp":"2026-04-22T00:01:00Z","cwd":"/a/b/proj","message":{"content":"more"}}"#,
+        ]);
+        let size = std::fs::metadata(f.path()).unwrap().len();
+        // Scan from the start of the 2nd line by asking scanner to resume at size/2
+        let result = scan_one_file(f.path(), size / 2, size).unwrap();
+        assert!(!result.is_empty());
+        // No `First` should be emitted because this is not a fresh scan.
+        assert!(result.iter().all(|m| m.message.role_tag != RoleTag::First));
+    }
+
+    #[test]
+    fn system_messages_filtered() {
+        let f = write_jsonl(&[
+            r#"{"type":"user","uuid":"u1","sessionId":"s1","timestamp":"2026-04-22T00:00:00Z","cwd":"/a/b/proj","message":{"content":"<system-reminder>ignore me"}}"#,
+            r#"{"type":"user","uuid":"u2","sessionId":"s1","timestamp":"2026-04-22T00:01:00Z","cwd":"/a/b/proj","message":{"content":"real prompt"}}"#,
+        ]);
+        let size = std::fs::metadata(f.path()).unwrap().len();
+        let result = scan_one_file(f.path(), 0, size).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message.uuid, "u2");
+    }
+
+    #[test]
+    fn truncated_file_resets_offset() {
+        let f = write_jsonl(&[
+            r#"{"type":"user","uuid":"u1","sessionId":"s1","timestamp":"2026-04-22T00:00:00Z","cwd":"/a/b/proj","message":{"content":"hi"}}"#,
+        ]);
+        let size = std::fs::metadata(f.path()).unwrap().len();
+        // Pretend we had offset larger than current size (file was shrunk).
+        let result = scan_one_file(f.path(), size + 9999, size).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message.role_tag, RoleTag::First);
+    }
+
+    #[test]
+    fn line_end_offset_monotonic() {
+        let f = write_jsonl(&[
+            r#"{"type":"user","uuid":"u1","sessionId":"s1","timestamp":"2026-04-22T00:00:00Z","cwd":"/a/b/proj","message":{"content":"one"}}"#,
+            r#"{"type":"user","uuid":"u2","sessionId":"s1","timestamp":"2026-04-22T00:01:00Z","cwd":"/a/b/proj","message":{"content":"two"}}"#,
+        ]);
+        let size = std::fs::metadata(f.path()).unwrap().len();
+        let result = scan_one_file(f.path(), 0, size).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].line_end < result[1].line_end);
+        assert_eq!(result[1].line_end, size);
     }
 }
