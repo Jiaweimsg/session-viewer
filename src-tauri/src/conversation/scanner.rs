@@ -95,6 +95,23 @@ pub fn classify_role_tag(text: &str, is_first_in_window: bool, is_fresh_scan: bo
     RoleTag::Followup
 }
 
+/// Given a window of jsonl lines ordered by position, find the first
+/// `type=assistant` line and return its `message.model`. Skips messages whose
+/// model is `<synthetic>` or `unknown` (same rule as claude/commands/report.rs).
+/// Returns `None` if no usable assistant is found.
+pub fn lookup_following_model(window: &[Value]) -> Option<String> {
+    for v in window {
+        let Some(ty) = v.get("type").and_then(|x| x.as_str()) else { continue };
+        if ty != "assistant" { continue; }
+        let Some(model) = v.get("message").and_then(|m| m.get("model")).and_then(|x| x.as_str()) else { continue };
+        if model == "<synthetic>" || model == "unknown" || model.is_empty() {
+            continue;
+        }
+        return Some(model.to_string());
+    }
+    None
+}
+
 #[cfg(test)]
 mod text_tests {
     use super::*;
@@ -209,5 +226,55 @@ mod role_tests {
     #[test]
     fn retry_beats_first() {
         assert_eq!(classify_role_tag("重试", true, true), RoleTag::Retry);
+    }
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn finds_first_assistant_model() {
+        let w = vec![
+            json!({"type": "user", "message": {"content": "x"}}),
+            json!({"type": "assistant", "message": {"model": "claude-opus-4-6"}}),
+        ];
+        assert_eq!(lookup_following_model(&w).as_deref(), Some("claude-opus-4-6"));
+    }
+
+    #[test]
+    fn skips_synthetic() {
+        let w = vec![
+            json!({"type": "assistant", "message": {"model": "<synthetic>"}}),
+            json!({"type": "assistant", "message": {"model": "claude-sonnet-4-5"}}),
+        ];
+        assert_eq!(lookup_following_model(&w).as_deref(), Some("claude-sonnet-4-5"));
+    }
+
+    #[test]
+    fn skips_unknown() {
+        let w = vec![
+            json!({"type": "assistant", "message": {"model": "unknown"}}),
+            json!({"type": "assistant", "message": {"model": "claude-opus-4-6"}}),
+        ];
+        assert_eq!(lookup_following_model(&w).as_deref(), Some("claude-opus-4-6"));
+    }
+
+    #[test]
+    fn returns_none_when_no_assistant() {
+        let w = vec![
+            json!({"type": "user", "message": {"content": "x"}}),
+            json!({"type": "user", "message": {"content": "y"}}),
+        ];
+        assert_eq!(lookup_following_model(&w), None);
+    }
+
+    #[test]
+    fn returns_none_when_only_synthetic() {
+        let w = vec![
+            json!({"type": "assistant", "message": {"model": "<synthetic>"}}),
+        ];
+        assert_eq!(lookup_following_model(&w), None);
     }
 }
