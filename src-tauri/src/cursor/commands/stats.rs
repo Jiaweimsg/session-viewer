@@ -170,10 +170,24 @@ pub fn get_stats() -> Result<CursorStats, String> {
     let mut session_msg_counts: Vec<u64> = Vec::new();
     let mut session_token_totals: Vec<u64> = Vec::new();
 
+    // Sessions that also have a transcript file; those are authoritative for
+    // prompts so we skip message/session counting from the bubble side to
+    // avoid double-counting. Token aggregation still runs from bubbles.
+    let transcript_session_ids =
+        crate::cursor::parser::agent_transcripts::collect_transcript_session_ids();
+    let bubble_session_count = headers.len();
+    let overlap = headers
+        .iter()
+        .filter(|h| transcript_session_ids.contains(&h.composer_id))
+        .count();
+
     for header in &headers {
+        let has_transcript = transcript_session_ids.contains(&header.composer_id);
         let bubbles = read_bubbles(&header.composer_id);
         let msg_count = bubbles.len();
-        total_messages += msg_count;
+        if !has_transcript {
+            total_messages += msg_count;
+        }
 
         let mut session_input: u64 = 0;
         let mut session_output: u64 = 0;
@@ -181,16 +195,18 @@ pub fn get_stats() -> Result<CursorStats, String> {
         // Session date from header
         let session_date = header.created_at.and_then(|ms| date_from_epoch_ms(ms));
 
-        // Register session in daily activity
-        if let Some(ref date) = session_date {
-            daily_sessions
-                .entry(date.clone())
-                .or_default()
-                .insert(header.composer_id.clone());
+        // Register session in daily activity (skip overlap — transcript loop handles it)
+        if !has_transcript {
+            if let Some(ref date) = session_date {
+                daily_sessions
+                    .entry(date.clone())
+                    .or_default()
+                    .insert(header.composer_id.clone());
+            }
         }
 
         for bubble in &bubbles {
-            // Token aggregation
+            // Token aggregation (always — token_count lives only in bubbles)
             if let Some(ref tc) = bubble.token_count {
                 session_input += tc.input_tokens;
                 session_output += tc.output_tokens;
@@ -208,12 +224,15 @@ pub fn get_stats() -> Result<CursorStats, String> {
             }
 
             // Daily message count - try bubble date, fallback to session date
-            let msg_date = bubble.created_at.as_deref()
-                .and_then(|s| if s.len() >= 10 { Some(s[..10].to_string()) } else { None })
-                .or_else(|| session_date.clone());
+            // Skip when transcript is authoritative.
+            if !has_transcript {
+                let msg_date = bubble.created_at.as_deref()
+                    .and_then(|s| if s.len() >= 10 { Some(s[..10].to_string()) } else { None })
+                    .or_else(|| session_date.clone());
 
-            if let Some(date) = msg_date {
-                *daily_messages.entry(date).or_insert(0) += 1;
+                if let Some(date) = msg_date {
+                    *daily_messages.entry(date).or_insert(0) += 1;
+                }
             }
 
             // Count user requests and model usage (type 1 = user message = one request)
@@ -230,16 +249,22 @@ pub fn get_stats() -> Result<CursorStats, String> {
         total_input_tokens += session_input;
         total_output_tokens += session_output;
 
-        // Project stats
+        // Project stats — tokens always, but session/message counts skip when
+        // transcript side will handle them.
         let project_key = header.workspace_path.as_deref().unwrap_or("(no workspace)").to_string();
         let proj = project_stats.entry(project_key).or_insert((0, 0, 0, 0));
         proj.0 += session_input;
         proj.1 += session_output;
-        proj.2 += 1;
-        proj.3 += msg_count;
+        if !has_transcript {
+            proj.2 += 1;
+            proj.3 += msg_count;
+        }
 
-        // Efficiency tracking
-        session_msg_counts.push(msg_count as u64);
+        // Efficiency tracking — only non-overlap bubbles (transcript loop
+        // appends its own msg_count for overlapping sessions).
+        if !has_transcript {
+            session_msg_counts.push(msg_count as u64);
+        }
         session_token_totals.push(session_input + session_output);
     }
 
@@ -354,7 +379,7 @@ pub fn get_stats() -> Result<CursorStats, String> {
     model_usage.sort_by(|a, b| b.request_count.cmp(&a.request_count));
 
     Ok(CursorStats {
-        total_sessions: headers.len() + transcript_session_count,
+        total_sessions: bubble_session_count - overlap + transcript_session_count,
         total_projects: unique_projects.len(),
         total_messages,
         total_requests,

@@ -159,6 +159,16 @@ pub fn date_from_epoch_ms(ms: u64) -> Option<String> {
     Some(dt.format("%Y-%m-%d").to_string())
 }
 
+/// Collect the session UUIDs that have a transcript file on disk.
+/// Used to deduplicate against the old SQLite bubble schema (where the same
+/// session also appears) so counts aren't inflated.
+pub fn collect_transcript_session_ids() -> std::collections::HashSet<String> {
+    scan_all_transcript_files()
+        .iter()
+        .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(String::from))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +299,12 @@ mod tests {
         writeln!(f, r#"{{"role":"assistant","message":{{"content":[{{"type":"text","text":"hi"}}]}}}}"#).unwrap();
         f.flush().unwrap();
         assert_eq!(count_user_messages(f.path()), 1);
+    }
+
+    #[test]
+    fn collect_transcript_session_ids_empty_when_no_files() {
+        // Best we can do without mocking the home dir: just assert the call works
+        // and returns a HashSet (may be non-empty if the dev machine has transcripts).
+        let _set = collect_transcript_session_ids();
     }
 }

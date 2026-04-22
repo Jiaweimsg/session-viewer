@@ -78,10 +78,17 @@ pub fn scan_all(state: &ConversationState) -> Vec<PendingMessage> {
 }
 
 fn scan_composers(state: &ConversationState) -> Vec<PendingMessage> {
+    let transcript_ids = crate::cursor::parser::agent_transcripts::collect_transcript_session_ids();
     let headers = read_composer_headers();
     let mut out = Vec::new();
 
     for header in &headers {
+        // Skip sessions whose prompts are already covered by the transcripts
+        // path — those will be uploaded via scan_transcripts() with a distinct
+        // file-offset watermark and real <user_query> extraction.
+        if transcript_ids.contains(&header.composer_id) {
+            continue;
+        }
         let Some(updated_at_ms) = header.last_updated_at else {
             // Can't decide freshness; skip.
             continue;
