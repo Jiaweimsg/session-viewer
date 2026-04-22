@@ -79,6 +79,20 @@ function formatTokens(n: number) {
   return n.toString();
 }
 
+// Build an XAxis tickFormatter that shortens dates: "MM-DD" when all dates
+// fall in a single calendar year, otherwise "YY-MM-DD" so cross-year bars
+// don't appear out of order. Tooltip labels still show the full YYYY-MM-DD
+// value from the data.
+function makeDateTickFormatter(dates: string[]) {
+  const multiYear =
+    new Set(dates.map((d) => (d || "").slice(0, 4))).size > 1;
+  return (value: string) => {
+    if (!value) return "";
+    if (value.length < 10) return value;
+    return multiYear ? value.slice(2) : value.slice(5);
+  };
+}
+
 // ============ Claude Stats ============
 
 function ClaudeStats({
@@ -119,14 +133,14 @@ function ClaudeStats({
   const totalToolCalls = filteredActivity.reduce((sum, d) => sum + d.toolCallCount, 0);
 
   const activityData = filteredActivity.map((d) => ({
-    date: d.date.slice(5),
+    date: d.date,
     messages: d.messageCount,
     sessions: d.sessionCount,
     tools: d.toolCallCount,
   }));
 
   const tokenData = filteredTokens.map((d) => ({
-    date: d.date.slice(5),
+    date: d.date,
     input: d.inputTokens,
     output: d.outputTokens,
     total: d.totalTokens,
@@ -134,6 +148,11 @@ function ClaudeStats({
 
   const filteredInputTokens = filteredTokens.reduce((s, d) => s + d.inputTokens, 0);
   const filteredOutputTokens = filteredTokens.reduce((s, d) => s + d.outputTokens, 0);
+
+  const dateTickFormatter = makeDateTickFormatter([
+    ...activityData.map((d) => d.date),
+    ...tokenData.map((d) => d.date),
+  ]);
 
   const modelBreakdown = tokenSummary && selectedMonth === "all"
     ? Object.entries(tokenSummary.tokensByModel)
@@ -191,7 +210,7 @@ function ClaudeStats({
           <BarChart data={activityData}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
             <XAxis
-              dataKey="date"
+              dataKey="date" tickFormatter={dateTickFormatter}
               tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
             />
             <YAxis
@@ -219,7 +238,7 @@ function ClaudeStats({
             <BarChart data={tokenData}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis
-                dataKey="date"
+                dataKey="date" tickFormatter={dateTickFormatter}
                 tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               />
               <YAxis
@@ -442,11 +461,13 @@ function CodexStats({ stats }: { stats: CodexTokenSummary }) {
     totalOutput > 0 ? (totalInput / totalOutput).toFixed(2) : "N/A";
 
   const dailyData = filteredDaily.map((d) => ({
-    date: d.date.slice(5),
+    date: d.date,
     input: d.inputTokens,
     output: d.outputTokens,
     total: d.totalTokens,
   }));
+
+  const dateTickFormatter = makeDateTickFormatter(dailyData.map((d) => d.date));
 
   const modelBreakdown = selectedMonth === "all"
     ? Object.entries(stats.tokensByModel)
@@ -497,7 +518,7 @@ function CodexStats({ stats }: { stats: CodexTokenSummary }) {
             <BarChart data={dailyData}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis
-                dataKey="date"
+                dataKey="date" tickFormatter={dateTickFormatter}
                 tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               />
               <YAxis
@@ -531,7 +552,7 @@ function CodexStats({ stats }: { stats: CodexTokenSummary }) {
             <AreaChart data={dailyData}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis
-                dataKey="date"
+                dataKey="date" tickFormatter={dateTickFormatter}
                 tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               />
               <YAxis
@@ -628,17 +649,22 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
     : filteredTokens.reduce((s, d) => s + d.outputTokens, 0);
 
   const activityData = filteredActivity.map((d) => ({
-    date: d.date.slice(5),
+    date: d.date,
     messages: d.messageCount,
     sessions: d.sessionCount,
   }));
 
   const tokenData = filteredTokens.map((d) => ({
-    date: d.date.slice(5),
+    date: d.date,
     input: d.inputTokens,
     output: d.outputTokens,
     total: d.totalTokens,
   }));
+
+  const dateTickFormatter = makeDateTickFormatter([
+    ...activityData.map((d) => d.date),
+    ...tokenData.map((d) => d.date),
+  ]);
 
   const modeData = stats.modeDistribution || [];
   const modelUsage = stats.modelUsage || [];
@@ -705,7 +731,7 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
             <BarChart data={activityData}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis
-                dataKey="date"
+                dataKey="date" tickFormatter={dateTickFormatter}
                 tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               />
               <YAxis
@@ -729,12 +755,16 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
       {/* Daily token usage chart */}
       {tokenData.length > 0 && (
         <div className="bg-card border border-border rounded-lg p-4 mb-6">
-          <h2 className="text-sm font-medium mb-4">每日 Token 用量</h2>
+          <h2 className="text-sm font-medium mb-1">每日 Token 用量</h2>
+          <p className="text-xs text-muted-foreground mb-4">
+            仅覆盖 Cursor 旧版 Chat Composer 消息的 token；Agent 模式与 Tab
+            completion 的 token 不在本地记录，准确值请查 Cursor 官方 Dashboard。
+          </p>
           <ResponsiveContainer width="100%" height={250}>
             <BarChart data={tokenData}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis
-                dataKey="date"
+                dataKey="date" tickFormatter={dateTickFormatter}
                 tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               />
               <YAxis
