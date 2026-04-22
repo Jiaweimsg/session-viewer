@@ -8,9 +8,12 @@ mod report;
 mod conversation;
 mod shared_models;
 mod state;
+mod version_check;
 mod watcher;
 
 use state::AppState;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 const DEFAULT_REPORT_SERVER: &str = "http://172.36.164.85:3000";
 const REPORT_INITIAL_DELAY_SECS: u64 = 30;
@@ -49,27 +52,46 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             // Start file system watcher in background
-            if let Err(e) = watcher::fs_watcher::start_watcher(handle) {
+            if let Err(e) = watcher::fs_watcher::start_watcher(handle.clone()) {
                 eprintln!("Warning: Failed to start file watcher: {}", e);
             }
 
+            // Shared "uploads blocked" flag, flipped by version_check when the
+            // server's min_client_version is newer than this build.
+            let upload_blocked = Arc::new(AtomicBool::new(false));
+
+            // One-shot version check 5s after launch (before first report).
+            let version_handle = handle.clone();
+            let version_flag = upload_blocked.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                let server = report_server();
+                version_check::enforce_min_version(&server, version_handle, version_flag).await;
+            });
+
             // Start auto-report in background (all tools)
-            tauri::async_runtime::spawn(async {
+            let report_flag = upload_blocked.clone();
+            tauri::async_runtime::spawn(async move {
                 let server = report_server();
                 eprintln!("[AutoReport] scheduled: first in {}s, then every {}s", REPORT_INITIAL_DELAY_SECS, REPORT_INTERVAL_SECS);
                 tokio::time::sleep(std::time::Duration::from_secs(REPORT_INITIAL_DELAY_SECS)).await;
                 loop {
-                    eprintln!("[AutoReport] reporting all tools to {}", server);
-                    match report::send_all_reports(&server).await {
-                        Ok(total) => eprintln!("[AutoReport] success: {} total records", total),
-                        Err(e) => eprintln!("[AutoReport] error: {}", e),
+                    if report_flag.load(Ordering::SeqCst) {
+                        eprintln!("[AutoReport] skipped (client version blocked)");
+                    } else {
+                        eprintln!("[AutoReport] reporting all tools to {}", server);
+                        match report::send_all_reports(&server).await {
+                            Ok(total) => eprintln!("[AutoReport] success: {} total records", total),
+                            Err(e) => eprintln!("[AutoReport] error: {}", e),
+                        }
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(REPORT_INTERVAL_SECS)).await;
                 }
             });
 
             // Start conversation collection loop (Claude Code only, independent of metrics)
-            tauri::async_runtime::spawn(async {
+            let conv_flag = upload_blocked.clone();
+            tauri::async_runtime::spawn(async move {
                 let server = report_server();
                 eprintln!(
                     "[Conversation] scheduled: first in {}s, then every {}s",
@@ -80,10 +102,14 @@ pub fn run() {
                 ))
                 .await;
                 loop {
-                    eprintln!("[Conversation] scanning + uploading to {}", server);
-                    match conversation::uploader::flush(&server, &["claude_code", "codex", "cursor"]).await {
-                        Ok(n) => eprintln!("[Conversation] cycle ok: {} messages", n),
-                        Err(e) => eprintln!("[Conversation] cycle failed: {}", e),
+                    if conv_flag.load(Ordering::SeqCst) {
+                        eprintln!("[Conversation] skipped (client version blocked)");
+                    } else {
+                        eprintln!("[Conversation] scanning + uploading to {}", server);
+                        match conversation::uploader::flush(&server, &["claude_code", "codex", "cursor"]).await {
+                            Ok(n) => eprintln!("[Conversation] cycle ok: {} messages", n),
+                            Err(e) => eprintln!("[Conversation] cycle failed: {}", e),
+                        }
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(
                         CONVERSATION_INTERVAL_SECS,

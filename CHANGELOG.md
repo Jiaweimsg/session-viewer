@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.3] - 2026-04-22
+
+### Added
+
+#### 服务端驱动的最低版本强制更新
+- 服务端新增 SQLite `settings` 表 + `GET /api/config` (公开) + `PUT /api/config` (JWT) 路由
+- Dashboard 头部新增"设置"按钮 → 弹窗配置 `min_client_version`（semver X.Y.Z 或留空）
+- 客户端 `version_check.rs` 启动 5s 后拉 `/api/config`，版本低于最低要求时：
+  - 翻 `Arc<AtomicBool>::upload_blocked` 标志 → metrics + conversation 两个 loop 立即跳过
+  - Tauri emit `force-update` 事件，带 `{current, min_required}`
+  - 网络失败或服务端未配置 → fail-open，不阻塞
+- 客户端 React `ForceUpdateOverlay` 组件监听事件 → 全屏半透明遮罩（不可关闭，无关闭按钮），提示用户联系管理员升级
+
+### Changed
+- 两个 upload loop (metrics + conversation) 启动时共享同一个 `upload_blocked` flag，由 `version_check` 控制
+
 ## [0.5.2] - 2026-04-22
 
 ### Added
