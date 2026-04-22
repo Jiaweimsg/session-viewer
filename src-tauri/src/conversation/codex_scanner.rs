@@ -15,24 +15,25 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
-/// Matches any `<xxx_context>` opening tag at the start (after whitespace).
-/// Covers `<environment_context>`, `<task_context>`, etc.
-fn is_context_block(text: &str) -> bool {
+/// Matches lowercase snake_case XML-like opening tags at the start of text,
+/// e.g. `<environment_context>`, `<task_context>`, `<turn_aborted>`.
+/// The tag name must contain at least one underscore, which filters out
+/// common HTML tags (`<div>`, `<p>`, `<html>`) that users might legitimately
+/// paste.
+fn is_snake_tag_start(text: &str) -> bool {
     let t = text.trim_start();
-    if !t.starts_with('<') {
+    let Some(rest) = t.strip_prefix('<') else {
         return false;
-    }
-    // Find the first '>' after the opening '<'.
-    let rest = &t[1..];
+    };
     let Some(end) = rest.find('>') else {
         return false;
     };
     let tag = &rest[..end];
-    // tag must end with "_context" and consist of [a-z_]
-    if !tag.ends_with("_context") {
+    if tag.is_empty() || !tag.contains('_') {
         return false;
     }
-    tag.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+    tag.chars()
+        .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit())
 }
 
 /// Matches Codex's ALL-CAPS XML-style injection tags like `<INSTRUCTIONS>`,
@@ -62,7 +63,7 @@ fn is_agents_md_preamble(text: &str) -> bool {
 
 /// Combined check: is this Codex-injected boilerplate (not a real user prompt)?
 fn is_system_injection(text: &str) -> bool {
-    is_context_block(text) || is_allcaps_tag_start(text) || is_agents_md_preamble(text)
+    is_snake_tag_start(text) || is_allcaps_tag_start(text) || is_agents_md_preamble(text)
 }
 
 /// Extract plain text from a Codex `response_item` row IF it's a real user prompt.
@@ -268,19 +269,22 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn is_context_block_matches_codex_tags() {
-        assert!(is_context_block("<environment_context>\n  <cwd>/foo</cwd>"));
-        assert!(is_context_block("<task_context>x</task_context>"));
-        assert!(is_context_block("   <environment_context>...")); // leading ws
+    fn is_snake_tag_start_matches_codex_tags() {
+        assert!(is_snake_tag_start("<environment_context>\n  <cwd>/foo</cwd>"));
+        assert!(is_snake_tag_start("<task_context>x</task_context>"));
+        assert!(is_snake_tag_start("<turn_aborted>\n user interrupted"));
+        assert!(is_snake_tag_start("   <environment_context>...")); // leading ws
     }
 
     #[test]
-    fn is_context_block_rejects_regular_text() {
-        assert!(!is_context_block("hello <environment_context> friend")); // not first
-        assert!(!is_context_block("<html>not context"));
-        assert!(!is_context_block("<ENV_CONTEXT>")); // not lowercase (handled by allcaps check instead)
-        assert!(!is_context_block("regular text"));
-        assert!(!is_context_block(""));
+    fn is_snake_tag_start_rejects_html_and_non_snake() {
+        assert!(!is_snake_tag_start("hello <environment_context> friend")); // not first
+        assert!(!is_snake_tag_start("<div>pasted code"));                    // no underscore
+        assert!(!is_snake_tag_start("<p>paragraph"));                        // no underscore
+        assert!(!is_snake_tag_start("<html>not context"));                   // no underscore
+        assert!(!is_snake_tag_start("<ENV_CONTEXT>")); // uppercase (caught by allcaps rule)
+        assert!(!is_snake_tag_start("regular text"));
+        assert!(!is_snake_tag_start(""));
     }
 
     #[test]
@@ -315,8 +319,10 @@ mod tests {
     #[test]
     fn is_system_injection_combines_all_checks() {
         assert!(is_system_injection("<environment_context>..."));
+        assert!(is_system_injection("<turn_aborted>\n interrupted"));
         assert!(is_system_injection("<INSTRUCTIONS>..."));
         assert!(is_system_injection("# AGENTS.md instructions for /x"));
+        assert!(!is_system_injection("<div>pasted html"));
         assert!(!is_system_injection("how do I write an AGENTS.md?"));
         assert!(!is_system_injection("real question"));
     }
