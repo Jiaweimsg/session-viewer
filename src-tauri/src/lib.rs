@@ -15,6 +15,8 @@ use state::AppState;
 const DEFAULT_REPORT_SERVER: &str = "http://172.36.164.85:3000";
 const REPORT_INITIAL_DELAY_SECS: u64 = 30;
 const REPORT_INTERVAL_SECS: u64 = 300; // 5 minutes
+const CONVERSATION_INITIAL_DELAY_SECS: u64 = 60;
+const CONVERSATION_INTERVAL_SECS: u64 = 300;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -52,6 +54,29 @@ pub fn run() {
                         Err(e) => eprintln!("[AutoReport] error: {}", e),
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(REPORT_INTERVAL_SECS)).await;
+                }
+            });
+
+            // Start conversation collection loop (Claude Code only, independent of metrics)
+            tauri::async_runtime::spawn(async {
+                eprintln!(
+                    "[Conversation] scheduled: first in {}s, then every {}s",
+                    CONVERSATION_INITIAL_DELAY_SECS, CONVERSATION_INTERVAL_SECS
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(
+                    CONVERSATION_INITIAL_DELAY_SECS,
+                ))
+                .await;
+                loop {
+                    eprintln!("[Conversation] scanning + uploading to {}", DEFAULT_REPORT_SERVER);
+                    match conversation::uploader::flush(DEFAULT_REPORT_SERVER).await {
+                        Ok(n) => eprintln!("[Conversation] cycle ok: {} messages", n),
+                        Err(e) => eprintln!("[Conversation] cycle failed: {}", e),
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(
+                        CONVERSATION_INTERVAL_SECS,
+                    ))
+                    .await;
                 }
             });
 
