@@ -50,6 +50,94 @@ pub fn advance_state(state: &mut ConversationState, msgs: &[PendingMessage]) {
     }
 }
 
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+struct ConversationPayload<'a> {
+    user_email: &'a str,
+    user_name: &'a str,
+    machine_id: &'a str,
+    client_version: String,
+    tool: &'a str,
+    reported_at: String,
+    messages: Vec<&'a ConversationMessage>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ConversationResponse {
+    #[serde(default)]
+    ok: Option<bool>,
+    #[serde(default)]
+    received: Option<u64>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum UploadError {
+    /// 4xx: payload-level error; do not retry automatically. Caller should
+    /// dead-letter and still advance offsets to avoid death loops.
+    ClientError(String),
+    /// 5xx or network: retry next cycle; do not advance offsets.
+    Transient(String),
+}
+
+impl std::fmt::Display for UploadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ClientError(s) => write!(f, "4xx: {}", s),
+            Self::Transient(s) => write!(f, "transient: {}", s),
+        }
+    }
+}
+
+pub async fn send_batch(
+    client: &reqwest::Client,
+    url: &str,
+    tool: &str,
+    user_email: &str,
+    user_name: &str,
+    machine_id: &str,
+    batch: &[PendingMessage],
+) -> Result<u64, UploadError> {
+    let payload = ConversationPayload {
+        user_email,
+        user_name,
+        machine_id,
+        client_version: env!("CARGO_PKG_VERSION").to_string(),
+        tool,
+        reported_at: chrono::Utc::now().to_rfc3339(),
+        messages: batch.iter().map(|p| &p.message).collect(),
+    };
+
+    let resp = client
+        .post(url)
+        .json(&payload)
+        .timeout(std::time::Duration::from_secs(60))
+        .send()
+        .await
+        .map_err(|e| UploadError::Transient(format!("send: {}", e)))?;
+
+    let status = resp.status();
+    if status.is_client_error() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(UploadError::ClientError(format!("{} {}", status, body)));
+    }
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(UploadError::Transient(format!("{} {}", status, body)));
+    }
+    let parsed: ConversationResponse = resp
+        .json()
+        .await
+        .map_err(|e| UploadError::Transient(format!("parse: {}", e)))?;
+    if let Some(err) = parsed.error {
+        return Err(UploadError::ClientError(err));
+    }
+    let _ = parsed.ok; // suppress unused-field warning
+    Ok(parsed.received.unwrap_or(0))
+}
+
 #[cfg(test)]
 mod batch_tests {
     use super::*;
@@ -149,3 +237,73 @@ mod batch_tests {
         assert_eq!(state.offset_for(&PathBuf::from("/a.jsonl")), 999);
     }
 }
+
+#[cfg(test)]
+mod http_tests {
+    use super::*;
+    use crate::conversation::RoleTag;
+
+    fn mk_msg() -> PendingMessage {
+        PendingMessage {
+            file: PathBuf::from("/x.jsonl"),
+            line_end: 100,
+            message: ConversationMessage {
+                uuid: "u".into(),
+                session_id: "s".into(),
+                parent_uuid: None,
+                timestamp: "2026-04-22T00:00:00Z".into(),
+                project: "p".into(),
+                cwd: "/p".into(),
+                git_branch: None,
+                model: Some("claude-opus-4-6".into()),
+                role_tag: RoleTag::First,
+                text: "hello".into(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn success_returns_received_count() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server.mock("POST", "/api/conversations")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"ok":true,"received":1}"#)
+            .create_async()
+            .await;
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/conversations", server.url());
+        let result = send_batch(&client, &url, "claude_code", "a@b", "a", "m", &[mk_msg()]).await;
+        mock.assert_async().await;
+        assert_eq!(result.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn server_500_is_transient() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server.mock("POST", "/api/conversations")
+            .with_status(500)
+            .with_body("boom")
+            .create_async()
+            .await;
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/conversations", server.url());
+        let err = send_batch(&client, &url, "claude_code", "a@b", "a", "m", &[mk_msg()]).await.unwrap_err();
+        assert!(matches!(err, UploadError::Transient(_)));
+    }
+
+    #[tokio::test]
+    async fn server_400_is_client_error() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server.mock("POST", "/api/conversations")
+            .with_status(400)
+            .with_body("bad")
+            .create_async()
+            .await;
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/conversations", server.url());
+        let err = send_batch(&client, &url, "claude_code", "a@b", "a", "m", &[mk_msg()]).await.unwrap_err();
+        assert!(matches!(err, UploadError::ClientError(_)));
+    }
+}
+
