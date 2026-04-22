@@ -362,13 +362,22 @@ CMD ["node", "dist/index.js"]
 > 添加于 0.5.0。独立于 `/api/report` 指标上报。
 
 ### 客户端
-- 模块: `src-tauri/src/conversation/{mod,state,scanner,uploader}.rs`
+- 模块: `src-tauri/src/conversation/{mod,state,scanner,codex_scanner,uploader}.rs`
 - 触发: `lib.rs` spawn，启动 60s 后首发，之后每 5 分钟
-- 覆盖: **仅 Claude Code**（MVP）。服务端路由与 Dashboard 已预留多工具扩展点
-- 幂等键: Claude `message_uuid`；水位线为 `{file_path: byte_offset}` 存于 `{data_dir}/session-viewer/conversation-state.json`
-- 过滤: 6 类 CLI 注入前缀、tool_result、空白
+- 覆盖: **Claude Code + Codex**（0.5.1 起）。服务端路由与 Dashboard 已预留多工具扩展点，后续 OpenCode/Copilot/Cursor 按需加
+- 幂等键:
+  - Claude: 原生 `message_uuid`
+  - Codex: 合成 `{session_id}_{line_start_offset}`（Codex 行无 uuid）
+- 水位线: `{file_path: byte_offset}` 存于 `{data_dir}/session-viewer/conversation-state.json`；Claude/Codex 文件路径天然不冲突，同一 HashMap 即可
+- 过滤:
+  - Claude: 6 类 CLI 注入前缀、tool_result、空白
+  - Codex: `role ∈ {system, developer}` 或首行 `<xxx_context>` 模式、空白
+- Model 回填:
+  - Claude: 紧随的 assistant 消息 `message.model`
+  - Codex: 后续的 `turn_context.payload.model` 行
 - 标签: `first` / `followup` / `retry`（增量扫 offset>0 时不再发 `first`）
 - 批次: 10MB 上限，断点续传；4xx 写 dead-letter log 并推进 offset 避免死循环；5xx 下轮重试
+- 调度: `flush(server_url, tools: &[&str])` 顺序跑多工具；lib.rs 传 `&["claude_code", "codex"]`
 - HTTP: 复用 `no_proxy()` 客户端（同 report.rs，绕过系统代理）
 
 ### 服务端
@@ -381,7 +390,8 @@ CMD ["node", "dist/index.js"]
 
 ### Dashboard
 - `public/index.html` "项目用量明细"新增"操作"列 → 右侧抽屉
-- 仅 `claude_code` 行显示按钮；其他工具灰置 `—`
+- `claude_code` / `codex` 行显示按钮；其他工具灰置 `—`
+- 抽屉 title 按工具名动态切换（Claude Code / Codex）
 - 抽屉支持文本搜索 + "仅首问"过滤 + 长 prompt 折叠 + ESC 关闭
 
 ## 关键数据流

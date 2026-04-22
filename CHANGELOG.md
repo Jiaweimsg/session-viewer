@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-04-22
+
+### Added
+
+#### Codex Prompt 采集
+- conversation collection 扩展到 Codex（`~/.codex/sessions/{Y}/{M}/{D}/rollout-*.jsonl`）
+- 幂等键 = `{session_id}_{line_start_offset}`（Codex 消息行没有原生 uuid，用合成 key）
+- 系统消息过滤：`role ∈ {system, developer}` 或首行匹配 `<xxx_context>` 模式（catches `<environment_context>` / `<task_context>` 等）
+- Model 回填：扫描 user 消息后的 `turn_context.payload.model` 行（Codex 不在 assistant 消息上挂 model）
+- `uploader::flush` 签名改为 `flush(server_url, tools: &[&str])`，共享 state/HTTP client，顺序上报多工具
+- lib.rs 现在 `flush(&server, &["claude_code", "codex"])`
+
+#### Dashboard
+- "查看问题"按钮启用条件扩到 `['claude_code', 'codex']`
+- 抽屉 title 动态显示工具名（Claude Code / Codex）
+
 ## [0.5.0] - 2026-04-22
 
 ### Added
