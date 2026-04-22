@@ -72,6 +72,12 @@ fn backfill_model(bubbles: &[CursorBubble], idx: usize) -> Option<String> {
 /// Walk all composer headers; for each composer whose header.last_updated_at has
 /// advanced since the last mark, read its bubbles and emit new user prompts.
 pub fn scan_all(state: &ConversationState) -> Vec<PendingMessage> {
+    let mut out = scan_composers(state);
+    out.extend(scan_transcripts(state));
+    out
+}
+
+fn scan_composers(state: &ConversationState) -> Vec<PendingMessage> {
     let headers = read_composer_headers();
     let mut out = Vec::new();
 
@@ -155,6 +161,51 @@ pub fn scan_all(state: &ConversationState) -> Vec<PendingMessage> {
         }
     }
 
+    out
+}
+
+fn scan_transcripts(state: &ConversationState) -> Vec<PendingMessage> {
+    use crate::cursor::parser::agent_transcripts as at;
+    let files = at::scan_all_transcript_files();
+    let mut out = Vec::new();
+    for path in files {
+        let start = state.offset_for(&path);
+        let Ok(meta) = std::fs::metadata(&path) else { continue };
+        let size = meta.len();
+        if start >= size { continue; }
+        let Some(t_meta) = at::extract_transcript_meta(&path) else { continue };
+
+        let is_fresh_scan = start == 0;
+        let timestamp = crate::cursor::parser::project_scanner::epoch_ms_to_rfc3339(t_meta.file_mtime_ms);
+        let project = t_meta.workspace_encoded.clone();
+        let cwd = format!("~/.cursor/projects/{}", t_meta.workspace_encoded);
+
+        let Ok(messages) = at::scan_one_transcript(&path, start, size) else { continue };
+        let mut first_emitted = false;
+        for m in messages {
+            let uuid = format!("{}_{}", t_meta.session_id, m.line_start);
+            let is_first_in_window = !first_emitted;
+            let role_tag = classify_role_tag(&m.text, is_first_in_window, is_fresh_scan);
+            if role_tag == RoleTag::First { first_emitted = true; }
+
+            out.push(PendingMessage {
+                file: path.clone(), // real path → handled by advance_state
+                line_end: m.line_end,
+                message: ConversationMessage {
+                    uuid,
+                    session_id: t_meta.session_id.clone(),
+                    parent_uuid: None,
+                    timestamp: timestamp.clone(),
+                    project: project.clone(),
+                    cwd: cwd.clone(),
+                    git_branch: None,
+                    model: None,
+                    role_tag,
+                    text: m.text,
+                },
+            });
+        }
+    }
     out
 }
 

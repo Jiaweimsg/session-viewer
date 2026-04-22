@@ -43,6 +43,11 @@ pub fn max_offsets_by_file(msgs: &[PendingMessage]) -> HashMap<PathBuf, u64> {
 /// line_end observed in `msgs`. Does not persist — caller must call state::save.
 pub fn advance_state(state: &mut ConversationState, msgs: &[PendingMessage]) {
     for (path, end) in max_offsets_by_file(msgs) {
+        // Skip synthetic "cursor:..." paths — those are handled by
+        // cursor_scanner::advance_marks, which updates state.cursor_marks.
+        if path.to_str().map(|s| s.starts_with("cursor:")).unwrap_or(false) {
+            continue;
+        }
         let current = state.offset_for(&path);
         if end > current {
             state.set_offset(path, end);
@@ -195,7 +200,10 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
             match send_batch(&client, &url, tool, &email, &name, &machine, &batch).await {
                 Ok(n) => {
                     match tool {
-                        "cursor" => crate::conversation::cursor_scanner::advance_marks(&mut state_snapshot.cursor_marks, &batch),
+                        "cursor" => {
+                            crate::conversation::cursor_scanner::advance_marks(&mut state_snapshot.cursor_marks, &batch);
+                            advance_state(&mut state_snapshot, &batch);
+                        }
                         _ => advance_state(&mut state_snapshot, &batch),
                     }
                     state_snapshot.last_scan_at = Some(chrono::Utc::now().to_rfc3339());
@@ -206,7 +214,10 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
                 Err(UploadError::ClientError(e)) => {
                     log_dead_letter(&batch, &e);
                     match tool {
-                        "cursor" => crate::conversation::cursor_scanner::advance_marks(&mut state_snapshot.cursor_marks, &batch),
+                        "cursor" => {
+                            crate::conversation::cursor_scanner::advance_marks(&mut state_snapshot.cursor_marks, &batch);
+                            advance_state(&mut state_snapshot, &batch);
+                        }
                         _ => advance_state(&mut state_snapshot, &batch),
                     }
                     state::save(&state_snapshot);
@@ -322,6 +333,28 @@ mod batch_tests {
         ];
         advance_state(&mut state, &msgs);
         assert_eq!(state.offset_for(&PathBuf::from("/a.jsonl")), 999);
+    }
+
+    #[test]
+    fn advance_state_skips_synthetic_cursor_paths() {
+        let mut state = ConversationState::default();
+        let msgs = vec![
+            PendingMessage {
+                file: PathBuf::from("cursor:comp-abc:1700000000000"),
+                line_end: 42,
+                message: mk("a", 1).message,
+            },
+            PendingMessage {
+                file: PathBuf::from("/Users/bin/.cursor/projects/x/agent-transcripts/s/s.jsonl"),
+                line_end: 999,
+                message: mk("b", 1).message,
+            },
+        ];
+        advance_state(&mut state, &msgs);
+        // Real path gets file_offsets entry
+        assert_eq!(state.offset_for(&PathBuf::from("/Users/bin/.cursor/projects/x/agent-transcripts/s/s.jsonl")), 999);
+        // Synthetic "cursor:..." does NOT get an entry
+        assert!(!state.file_offsets.contains_key(&PathBuf::from("cursor:comp-abc:1700000000000")));
     }
 }
 

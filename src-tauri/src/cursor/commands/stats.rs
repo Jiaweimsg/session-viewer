@@ -243,6 +243,31 @@ pub fn get_stats() -> Result<CursorStats, String> {
         session_token_totals.push(session_input + session_output);
     }
 
+    // ── Also ingest Cursor Agent transcripts (new jsonl format) ──
+    // These don't carry token counts, so we only bump message/session counts.
+    let transcript_files = crate::cursor::parser::agent_transcripts::scan_all_transcript_files();
+    for tpath in &transcript_files {
+        let Some(tmeta) = crate::cursor::parser::agent_transcripts::extract_transcript_meta(tpath) else { continue };
+        let msg_count = crate::cursor::parser::agent_transcripts::count_user_messages(tpath);
+        if msg_count == 0 { continue; }
+
+        total_messages += msg_count as usize;
+        let date = crate::cursor::parser::agent_transcripts::date_from_epoch_ms(tmeta.file_mtime_ms);
+        if let Some(date) = date {
+            *daily_messages.entry(date.clone()).or_insert(0) += msg_count;
+            daily_sessions.entry(date).or_default().insert(tmeta.session_id.clone());
+        }
+
+        // Project aggregation — workspace_encoded serves as the project name.
+        let project = tmeta.workspace_encoded.clone();
+        let entry = project_stats.entry(project).or_insert((0, 0, 0, 0));
+        entry.2 += 1;            // session_count
+        entry.3 += msg_count as usize; // message_count
+
+        session_msg_counts.push(msg_count);
+    }
+    let transcript_session_count = transcript_files.len();
+
     // Build daily activity (sorted)
     let mut all_dates: HashSet<String> = HashSet::new();
     all_dates.extend(daily_messages.keys().cloned());
@@ -329,7 +354,7 @@ pub fn get_stats() -> Result<CursorStats, String> {
     model_usage.sort_by(|a, b| b.request_count.cmp(&a.request_count));
 
     Ok(CursorStats {
-        total_sessions: headers.len(),
+        total_sessions: headers.len() + transcript_session_count,
         total_projects: unique_projects.len(),
         total_messages,
         total_requests,
