@@ -2,10 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CursorMark {
+    #[serde(default)]
+    pub last_updated_at: u64,  // ms since epoch
+    #[serde(default)]
+    pub bubble_index: usize,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ConversationState {
     pub file_offsets: HashMap<PathBuf, u64>,
     pub last_scan_at: Option<String>,
+    #[serde(default)]
+    pub cursor_marks: HashMap<String, CursorMark>,  // composer_id -> mark
 }
 
 impl ConversationState {
@@ -88,5 +98,23 @@ mod tests {
         let back: ConversationState = serde_json::from_str(&json).unwrap();
         assert_eq!(back.offset_for(Path::new("/a.jsonl")), 10);
         assert_eq!(back.last_scan_at.as_deref(), Some("2026-04-22T00:00:00Z"));
+    }
+
+    #[test]
+    fn serde_roundtrip_includes_cursor_marks() {
+        let mut s = ConversationState::default();
+        s.cursor_marks.insert("abc".into(), CursorMark { last_updated_at: 1700000000000, bubble_index: 5 });
+        let json = serde_json::to_string(&s).unwrap();
+        let back: ConversationState = serde_json::from_str(&json).unwrap();
+        let m = back.cursor_marks.get("abc").unwrap();
+        assert_eq!(m.last_updated_at, 1700000000000);
+        assert_eq!(m.bubble_index, 5);
+    }
+
+    #[test]
+    fn old_state_without_cursor_marks_still_loads() {
+        let old_json = r#"{"file_offsets":{},"last_scan_at":null}"#;
+        let s: ConversationState = serde_json::from_str(old_json).unwrap();
+        assert!(s.cursor_marks.is_empty());
     }
 }

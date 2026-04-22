@@ -62,7 +62,7 @@ fn is_agents_md_preamble(text: &str) -> bool {
 }
 
 /// Combined check: is this Codex-injected boilerplate (not a real user prompt)?
-fn is_system_injection(text: &str) -> bool {
+pub fn is_system_injection(text: &str) -> bool {
     is_snake_tag_start(text) || is_allcaps_tag_start(text) || is_agents_md_preamble(text)
 }
 
