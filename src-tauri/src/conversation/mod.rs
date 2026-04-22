@@ -7,6 +7,7 @@
 //! State (per-file byte offsets) is persisted to disk so scans are incremental
 //! and resumable after a crash or partial upload.
 
+pub mod codex_scanner;
 pub mod scanner;
 pub mod state;
 pub mod uploader;
