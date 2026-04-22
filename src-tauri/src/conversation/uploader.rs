@@ -138,6 +138,70 @@ pub async fn send_batch(
     Ok(parsed.received.unwrap_or(0))
 }
 
+use crate::conversation::{scanner, state};
+
+fn dead_letter_file() -> Option<PathBuf> {
+    let base = dirs::data_dir().or_else(dirs::config_dir)?;
+    let dir = base.join("session-viewer");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("conversation-errors.log"))
+}
+
+fn log_dead_letter(batch: &[PendingMessage], err: &str) {
+    let Some(path) = dead_letter_file() else { return };
+    use std::io::Write;
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else { return };
+    let ts = chrono::Utc::now().to_rfc3339();
+    let uuids: Vec<&str> = batch.iter().map(|p| p.message.uuid.as_str()).collect();
+    let _ = writeln!(f, "{} error={} count={} uuids={:?}", ts, err, batch.len(), uuids);
+}
+
+/// Scan all Claude projects and upload pending messages in 10MB batches.
+/// Advances per-file offsets only for batches that succeed or 4xx (to avoid
+/// death loops). On 5xx/network errors, stops and leaves remaining work for
+/// the next cycle.
+pub async fn flush(server_url: &str) -> Result<u64, String> {
+    let url = format!("{}/api/conversations", server_url.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .map_err(|e| format!("client build: {}", e))?;
+
+    let mut state_snapshot = state::load();
+    let pending = scanner::scan_all(&state_snapshot);
+    if pending.is_empty() {
+        return Ok(0);
+    }
+
+    let email = crate::report::get_user_email();
+    let name = crate::report::get_user_name();
+    let machine = crate::report::get_machine_id();
+
+    let mut total: u64 = 0;
+    for batch in split_into_batches(pending, MAX_BATCH_BYTES) {
+        match send_batch(&client, &url, "claude_code", &email, &name, &machine, &batch).await {
+            Ok(n) => {
+                advance_state(&mut state_snapshot, &batch);
+                state_snapshot.last_scan_at = Some(chrono::Utc::now().to_rfc3339());
+                state::save(&state_snapshot);
+                total += n;
+                eprintln!("[Conversation] uploaded {} messages", n);
+            }
+            Err(UploadError::ClientError(e)) => {
+                log_dead_letter(&batch, &e);
+                advance_state(&mut state_snapshot, &batch);
+                state::save(&state_snapshot);
+                eprintln!("[Conversation] 4xx (dead-lettered): {}", e);
+            }
+            Err(UploadError::Transient(e)) => {
+                eprintln!("[Conversation] transient error, will retry next cycle: {}", e);
+                return Err(e);
+            }
+        }
+    }
+    Ok(total)
+}
+
 #[cfg(test)]
 mod batch_tests {
     use super::*;
