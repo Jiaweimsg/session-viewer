@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.5] - 2026-04-22
+
+### Added
+
+#### Cursor Agent Transcripts 接入
+- 新增 `src-tauri/src/cursor/parser/agent_transcripts.rs` 读取 `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` —— Cursor 新版 Agent 对话格式
+- `scan_one_transcript`: 按字节 offset 增量扫描，与 Claude / Codex 的水位线一致
+- 过滤规则：只保留 `<user_query>...</user_query>` 包裹的真实用户提问，排除 `user_info` / `git_status` / `rules` 等系统注入
+- 合成 uuid = `{session_uuid}_{line_start_offset}`（无原生 uuid）
+- timestamp 使用文件 mtime（transcripts 没有 per-message 时间戳）
+- model = null（transcripts 没有 model 字段）
+
+#### 双路数据源合并
+- `conversation/cursor_scanner.rs::scan_all` 合并两条 Cursor 数据源：
+  - 旧 SQLite bubble 路径（`scan_composers`，保留作老数据兜底）
+  - 新 agent-transcripts 路径（`scan_transcripts`，byte-offset 水位线）
+- `conversation/uploader.rs::flush` 对 cursor 工具同时调用 `advance_marks`（bubble 合成路径）+ `advance_state`（transcripts 真路径）
+- `advance_state` 跳过 `cursor:...` 前缀的合成路径，避免污染 `file_offsets`
+
+#### 本地 Cursor Stats 整合
+- `cursor/commands/stats.rs` 在 bubble 聚合之后加入 transcripts 聚合：
+  - `total_messages` / `daily_messages` / `daily_sessions` / `project_stats` 同步累加
+  - `total_sessions += transcript_session_count`
+  - Transcripts 无 token 数据，不进 `daily_tokens`
+
 ## [0.5.4] - 2026-04-22
 
 ### Changed
