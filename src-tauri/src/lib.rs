@@ -1,3 +1,4 @@
+mod blocklist;
 mod claude;
 mod codex;
 mod copilot;
@@ -36,6 +37,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             commands::get_projects,
@@ -48,6 +50,8 @@ pub fn run() {
             commands::get_advanced_stats,
             commands::report_usage,
             commands::resume_session,
+            commands::get_upload_blocklist,
+            commands::set_upload_blocklist,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

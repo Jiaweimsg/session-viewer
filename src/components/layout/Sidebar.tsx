@@ -10,6 +10,7 @@ import {
   Palette,
   RefreshCw,
   ChevronDown,
+  Settings,
 } from "lucide-react";
 import { ThemePicker } from "./ThemePicker";
 
@@ -107,6 +108,16 @@ export function Sidebar() {
           >
             <BarChart3 className="w-4 h-4" />
             使用统计
+          </button>
+          <button
+            onClick={() => navigate("/settings")}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive("/settings")
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              }`}
+          >
+            <Settings className="w-4 h-4" />
+            设置
           </button>
         </div>
 

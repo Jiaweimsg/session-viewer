@@ -287,3 +287,15 @@ pub fn get_advanced_stats(tool: String, state: tauri::State<'_, AppState>) -> Re
     let cache = state.stats_cache.lock();
     Ok(cache.get(&tool).map(|c| c.advanced_stats_json.clone()).unwrap_or(Value::Null))
 }
+
+/// 读取上报黑名单（cwd 前缀列表）。
+#[tauri::command]
+pub fn get_upload_blocklist() -> crate::blocklist::UploadBlocklist {
+    crate::blocklist::load()
+}
+
+/// 覆写上报黑名单。前端传完整列表，后端直接落盘。
+#[tauri::command]
+pub fn set_upload_blocklist(blocklist: crate::blocklist::UploadBlocklist) -> Result<(), String> {
+    crate::blocklist::save(&blocklist)
+}

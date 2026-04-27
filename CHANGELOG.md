@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.6] - 2026-04-27
+
+### Added
+
+#### 上报黑名单
+- 新增 `src-tauri/src/blocklist.rs` 模块：以 `cwd` 前缀匹配排除指定目录的对话内容上报
+- 黑名单仅作用于 `/api/conversations`（用户 Prompt 上传）；`/api/report`（用量统计）不受影响
+- 持久化到 `{data_dir}/session-viewer/upload-blocklist.json`，每轮上传时 reload，编辑即生效
+- 命中黑名单的消息仍推进 file offset / cursor mark，避免重复扫描；移除黑名单后这部分历史不补传
+- 跨平台路径标准化：`\` 自动归一为 `/`，前缀比较防止 `/foo` 误命中 `/foobar`
+- 新增 Tauri 命令 `get_upload_blocklist` / `set_upload_blocklist`
+
+#### 设置页
+- 新增 `/settings` 路由与侧边栏入口
+- 整合"上报服务端地址"配置（原嵌在统计页的扳手弹窗）
+- 整合"立即上报"按钮（原嵌在统计页右上角）
+- 新增"对话内容上报黑名单"管理：列表 + 手动输入 + 文件夹选择器（`tauri-plugin-dialog`）
+
+### Changed
+
+- 统计页右上角移除"上报"按钮和扳手图标，仅保留月份筛选
+
 ## [0.5.5] - 2026-04-22
 
 ### Added

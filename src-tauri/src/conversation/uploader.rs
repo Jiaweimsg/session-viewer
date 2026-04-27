@@ -181,6 +181,7 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
     let machine = crate::report::get_machine_id();
 
     let mut state_snapshot = state::load();
+    let blocklist = crate::blocklist::load();
     let mut total: u64 = 0;
     for &tool in tools {
         let pending = match tool {
@@ -192,6 +193,34 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
                 continue;
             }
         };
+        if pending.is_empty() {
+            continue;
+        }
+
+        // 黑名单过滤：命中 cwd 的消息不上报，但仍推进 offset，避免下轮重复扫。
+        let total_pending = pending.len();
+        let (pending, blocked): (Vec<PendingMessage>, Vec<PendingMessage>) = pending
+            .into_iter()
+            .partition(|p| !blocklist.is_blocked(&p.message.cwd));
+        if !blocked.is_empty() {
+            eprintln!(
+                "[Conversation/{}] blocklist filtered {} of {} messages",
+                tool,
+                blocked.len(),
+                total_pending
+            );
+            match tool {
+                "cursor" => {
+                    crate::conversation::cursor_scanner::advance_marks(
+                        &mut state_snapshot.cursor_marks,
+                        &blocked,
+                    );
+                    advance_state(&mut state_snapshot, &blocked);
+                }
+                _ => advance_state(&mut state_snapshot, &blocked),
+            }
+            state::save(&state_snapshot);
+        }
         if pending.is_empty() {
             continue;
         }

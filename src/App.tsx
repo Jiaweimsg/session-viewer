@@ -6,6 +6,7 @@ import { SessionsPage } from "./components/session/SessionsPage";
 import { MessagesPage } from "./components/message/MessagesPage";
 import { SearchPage } from "./components/search/SearchPage";
 import { StatsPage } from "./components/stats/StatsPage";
+import { SettingsPage } from "./components/settings/SettingsPage";
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           />
           <Route path="/:tool/search" element={<SearchPage />} />
           <Route path="/:tool/stats" element={<StatsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>
       <ForceUpdateOverlay />

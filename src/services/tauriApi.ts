@@ -67,3 +67,15 @@ export async function resumeSession(
 ): Promise<void> {
   return invoke<void>("resume_session", { tool, sessionId, workDir, filePath });
 }
+
+export interface UploadBlocklist {
+  cwd_prefixes: string[];
+}
+
+export async function getUploadBlocklist(): Promise<UploadBlocklist> {
+  return invoke<UploadBlocklist>("get_upload_blocklist");
+}
+
+export async function setUploadBlocklist(blocklist: UploadBlocklist): Promise<void> {
+  return invoke<void>("set_upload_blocklist", { blocklist });
+}
