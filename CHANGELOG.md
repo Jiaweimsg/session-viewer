@@ -4,6 +4,43 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.10] - 2026-04-27
+
+### Fixed
+
+#### Cursor 「打开」/ 复制按钮静默失效
+- 根因 1：`SessionsPage` 用 `encodeURIComponent(p.cwd) === projectKey` 在 projects 数组里找当前 project，但 React Router 的 `useParams` 已经自动 decode URL 参数 → encoded vs decoded 永远不相等 → `project = undefined` → workDir 拿不到 → handler 在 `if (!workDir) return` 提前退出。codex / copilot / cursor 三个工具都中招
+- 根因 2：错误反馈用 `window.alert`，Tauri 2 把它路由到 `tauri-plugin-dialog` 的 message API，capabilities 没授权 → "Command plugin:dialog|message not allowed by ACL" promise rejection 静默吞掉。所以即便 spawn 失败用户也看不到错误
+- 修复：去掉 encodeURIComponent，直接 `p.cwd === projectKey`；capabilities 加 `dialog:default`
+
+#### Cursor 全局搜索 crash
+- `cursor/commands/search.rs:68` 用 byte slicing `&text[..200]` 截断匹配上下文，中文 prompt 200 byte 边界落在多字节字符中间会 panic
+- 改为字符级安全截断 `text.chars().take(200).collect()`，加 4 个单测覆盖 ASCII / 中文 / 长串边界
+- Windows release build 没 stderr console，crash 时窗口直接关，是用户体验最大杀手
+
+#### Cursor 用量上报缺 Agent Transcripts 来源
+- `report::collect_cursor_records` 之前只读 SQLite Composer，没有把新版 Cursor Agent transcripts 算进 usage_records
+- 结果：Agent 模式产生的项目在 dashboard 上**完全没有用量行**，conversation 文件即便存在也没"查看问题"入口
+- 现在两条来源都聚合：Composer 提供完整 token+session+message，transcripts 补 session+message（无 token）
+- transcripts 项目的 `project` 字段使用 `workspace_encoded`，与 conversation 上报保持一致；服务端 fuzzy 匹配（同步发布）桥接 encoded ↔ basename ↔ underscore/dash 差异
+
+### Changed
+
+#### Cursor 会话操作按钮跨平台
+- 之前：Resume 按钮调用未实现的 stub（`Err("Cursor session resume is not yet supported")`），点击无反应；Copy 按钮命令是 `open -a Cursor` macOS only
+- 现在：
+  - Resume 改名「打开」，调用 `open -a Cursor` (macOS) / `cursor` (Windows/Linux) 在 Cursor IDE 中打开 workspace 目录
+  - Copy 命令跨平台：macOS 复制 `open -a Cursor '...'`，Windows/Linux 复制 `cursor "..."`
+  - Resume 失败用 `alert()` 显示错误（Windows release build 没 console，console.error 用户看不见）
+  - Windows 上 spawn cursor 加 `CREATE_NO_WINDOW`
+
+### Server-side（同步）
+
+#### `/api/conversations/detail` project fuzzy 匹配
+- usage_records 来自 SQLite Composer 的 basename（`toolkit`），conversation jsonl 来自 Cursor Agent Transcripts 的 workspace_encoded（`d-project-toolkit`，所有 `_/\` 转为 `-`）—— 同一项目两边名字不一致
+- 之前严格相等过滤导致 dashboard "查看问题" 拿不到任何 message
+- 现在按 `_` 等价 `-` 的归一化 + `(分隔符){query}` 后缀匹配桥接两种命名
+
 ## [0.5.9] - 2026-04-27
 
 ### Added

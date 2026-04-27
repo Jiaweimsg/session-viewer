@@ -9,7 +9,7 @@
     "shell:allow-execute",
     "fs:allow-read-text-file",
     "fs:default",
-    "dialog:allow-open",
+    "dialog:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"

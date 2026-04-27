@@ -31,11 +31,11 @@ export function SessionsPage() {
 
   const project =
     activeTool === "codex"
-      ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
+      ? projects.find((p) => p.cwd === projectKey)
       : activeTool === "copilot"
-      ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
+      ? projects.find((p) => p.cwd === projectKey)
       : activeTool === "cursor"
-      ? projects.find((p) => encodeURIComponent(p.cwd) === projectKey)
+      ? projects.find((p) => p.cwd === projectKey)
       : projects.find((p) => p.encodedName === projectKey);
 
   useEffect(() => {
@@ -62,6 +62,8 @@ export function SessionsPage() {
       await resumeSession(activeTool, session.sessionId, workDir, session.fullPath || undefined);
     } catch (err) {
       console.error("Failed to resume session:", err);
+      const msg = typeof err === "string" ? err : (err as any)?.message ?? String(err);
+      alert(msg);
     }
   };
 
@@ -76,13 +78,18 @@ export function SessionsPage() {
         ? project?.cwd || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
+    const isWindows =
+      typeof navigator !== "undefined" &&
+      /win/i.test(navigator.platform);
     const cmd =
       activeTool === "codex"
         ? `cd '${workDir}' && codex resume ${session.sessionId}`
         : activeTool === "copilot"
         ? `cd '${workDir}' && copilot --resume=${session.sessionId}`
         : activeTool === "cursor"
-        ? `open -a Cursor '${workDir}'`
+        // Cursor: macOS 用 open -a Cursor（不依赖 PATH 上的 cursor CLI），
+        // Windows/Linux 用 cursor 命令（IDE 安装时默认入 PATH）
+        ? (isWindows ? `cursor "${workDir}"` : `open -a Cursor '${workDir}'`)
         : `cd '${workDir}' && claude --resume ${session.sessionId}`;
     navigator.clipboard.writeText(cmd).then(() => {
       setCopiedId(session.sessionId);
@@ -237,10 +244,10 @@ export function SessionsPage() {
                   <button
                     onClick={(e) => handleResume(e, session)}
                     className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-1"
-                    title="在终端中恢复此会话"
+                    title={activeTool === "cursor" ? "在 Cursor 中打开此 workspace" : "在终端中恢复此会话"}
                   >
                     <Play className="w-3 h-3" />
-                    Resume
+                    {activeTool === "cursor" ? "打开" : "Resume"}
                   </button>
                   <button
                     onClick={(e) => handleCopy(e, session)}

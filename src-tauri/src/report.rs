@@ -498,19 +498,17 @@ fn collect_copilot_records() -> Result<Vec<UsageRecord>, String> {
 // ── Cursor collection ───────────────────────────────────────
 
 fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
+    use crate::cursor::parser::agent_transcripts as at;
     use crate::cursor::parser::project_scanner::{
         read_composer_headers, read_bubbles, epoch_ms_to_rfc3339,
     };
-
-    let headers = read_composer_headers();
-    if headers.is_empty() {
-        return Ok(Vec::new());
-    }
 
     // Aggregate by (date, project, model)
     type AggKey = (String, String, String);
     let mut agg: HashMap<AggKey, (u64, u64, u64, u64)> = HashMap::new(); // (input, output, sessions, messages)
 
+    // ── Source 1: SQLite Composer (carries token counts) ──
+    let headers = read_composer_headers();
     for h in &headers {
         let created = match h.created_at {
             Some(ms) => epoch_ms_to_rfc3339(ms),
@@ -560,6 +558,32 @@ fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
         entry.1 += output_tokens;
         entry.2 += 1;
         entry.3 += msg_count;
+    }
+
+    // ── Source 2: Agent Transcripts (no token counts; session/message only) ──
+    //
+    // Newer Cursor versions write Agent conversations as jsonl under
+    // `~/.cursor/projects/{workspace_encoded}/agent-transcripts/...`. They have
+    // no token info and no real workspace_path — we use `workspace_encoded` as
+    // the project key. The dashboard's "查看问题" detail handler uses fuzzy
+    // matching (server-side) to bridge encoded vs basename names so the
+    // entry-point is reachable from usage rows.
+    //
+    // Without this block, transcripts produce conversation jsonl on the server
+    // but no usage_records row → no clickable entry on the dashboard.
+    let transcript_files = at::scan_all_transcript_files();
+    for tpath in &transcript_files {
+        let Some(tmeta) = at::extract_transcript_meta(tpath) else { continue };
+        let Some(date) = at::date_from_epoch_ms(tmeta.file_mtime_ms) else { continue };
+        let msg_count = at::count_user_messages(tpath);
+        if msg_count == 0 { continue; }
+
+        let project = tmeta.workspace_encoded.clone();
+        let model = "cursor".to_string();
+        let key = (date, project, model);
+        let entry = agg.entry(key).or_insert((0, 0, 0, 0));
+        entry.2 += 1;            // session
+        entry.3 += msg_count;    // messages
     }
 
     Ok(agg.into_iter().map(|((date, project, model), (input, output, sessions, messages))| {

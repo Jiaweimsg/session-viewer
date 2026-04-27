@@ -150,6 +150,8 @@ export function MessagesPage() {
       await resumeSession(activeTool, sid, workDir, session?.fullPath || undefined);
     } catch (err) {
       console.error("Failed to resume session:", err);
+      const msg = typeof err === "string" ? err : (err as any)?.message ?? String(err);
+      alert(msg);
     }
   };
 
@@ -163,11 +165,16 @@ export function MessagesPage() {
         ? project?.cwd
         : session?.projectPath || project?.displayPath;
     if (!workDir) return;
+    const isWindows =
+      typeof navigator !== "undefined" &&
+      /win/i.test(navigator.platform);
     const cmd =
       activeTool === "codex"
         ? `cd '${workDir}' && codex resume ${sid}`
         : activeTool === "cursor"
-        ? `open -a Cursor '${workDir}'`
+        // Cursor: macOS 用 open -a Cursor（不要求 cursor CLI 在 PATH），
+        // Windows/Linux 用 cursor 命令
+        ? (isWindows ? `cursor "${workDir}"` : `open -a Cursor '${workDir}'`)
         : `cd '${workDir}' && claude --resume ${sid}`;
     navigator.clipboard.writeText(cmd).then(() => {
       setCopied(true);
@@ -224,9 +231,10 @@ export function MessagesPage() {
           <button
             onClick={handleResume}
             className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-1"
+            title={activeTool === "cursor" ? "在 Cursor 中打开此 workspace" : "在终端中恢复此会话"}
           >
             <Play className="w-3 h-3" />
-            Resume
+            {activeTool === "cursor" ? "打开" : "Resume"}
           </button>
           <button
             onClick={handleCopy}

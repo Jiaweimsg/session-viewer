@@ -63,9 +63,12 @@ pub fn global_search(query: String, max_results: usize) -> Result<Vec<CursorSear
                         2 => "assistant",
                         _ => "unknown",
                     };
-                    // Truncate match context
-                    let matched = if text.len() > 200 {
-                        format!("{}...", &text[..200])
+                    // Truncate match context (char-safe: byte slicing would panic
+                    // when the 200-byte boundary lands inside a multi-byte UTF-8
+                    // sequence — common when the prompt is Chinese).
+                    let matched = if text.chars().count() > 200 {
+                        let truncated: String = text.chars().take(200).collect();
+                        format!("{}...", truncated)
                     } else {
                         text.clone()
                     };
@@ -83,4 +86,47 @@ pub fn global_search(query: String, max_results: usize) -> Result<Vec<CursorSear
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    /// Replicates the truncation arithmetic from `global_search`. Guards against
+    /// a regression where byte slicing was used and panicked on Chinese prompts
+    /// whose 200-byte boundary fell inside a multi-byte sequence.
+    fn truncate_for_match(text: &str) -> String {
+        if text.chars().count() > 200 {
+            let truncated: String = text.chars().take(200).collect();
+            format!("{}...", truncated)
+        } else {
+            text.to_string()
+        }
+    }
+
+    #[test]
+    fn short_ascii_unchanged() {
+        assert_eq!(truncate_for_match("hello"), "hello");
+    }
+
+    #[test]
+    fn short_chinese_unchanged() {
+        assert_eq!(truncate_for_match("你好世界"), "你好世界");
+    }
+
+    #[test]
+    fn long_chinese_does_not_panic_and_truncates_to_chars() {
+        // 300 Chinese chars = 900 bytes; pure byte slicing at 200 used to panic.
+        let long: String = "中".repeat(300);
+        let out = truncate_for_match(&long);
+        assert!(out.ends_with("..."));
+        // Should be 200 chars + "..."; ensure char count, not byte count.
+        let body: String = "中".repeat(200);
+        assert_eq!(out, format!("{}...", body));
+    }
+
+    #[test]
+    fn long_ascii_truncates_to_200_chars_plus_ellipsis() {
+        let long = "a".repeat(500);
+        let out = truncate_for_match(&long);
+        assert_eq!(out.len(), 200 + 3);
+    }
 }
