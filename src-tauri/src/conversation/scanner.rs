@@ -178,7 +178,11 @@ pub fn scan_one_file(
             .filter(|s| !s.is_empty())
             .map(String::from);
 
-        let project = cwd.rsplit('/').find(|s| !s.is_empty()).unwrap_or("unknown").to_string();
+        let project = cwd
+            .rsplit(|c: char| c == '/' || c == '\\')
+            .find(|s| !s.is_empty())
+            .unwrap_or("unknown")
+            .to_string();
 
         let tail: Vec<Value> = lines[i + 1..].iter().map(|(_, v)| v.clone()).collect();
         let model = lookup_following_model(&tail);

@@ -10,6 +10,8 @@ import {
   Upload,
   Server,
   FolderOpen,
+  UserCircle2,
+  RotateCcw,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import * as api from "../../services/tauriApi";
@@ -34,6 +36,7 @@ export function SettingsPage() {
           </p>
         </div>
         <ReportServerSection />
+        <IdentitySection />
         <ManualReportSection />
         <BlocklistSection />
       </div>
@@ -107,6 +110,167 @@ function ReportServerSection() {
             <span className="text-emerald-500">已保存</span>
           </>
         )}
+      </div>
+    </section>
+  );
+}
+
+// ============ 用户身份 ============
+
+function IdentitySection() {
+  const [view, setView] = useState<api.IdentityView | null>(null);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [save, setSave] = useState<SaveState>({ kind: "idle" });
+
+  async function refresh() {
+    try {
+      const v = await api.getIdentityView();
+      setView(v);
+      setName(v.override_name ?? "");
+      setEmail(v.override_email ?? "");
+    } catch (e: any) {
+      setSave({ kind: "err", msg: String(e?.message ?? e) });
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function persist() {
+    setSave({ kind: "saving" });
+    try {
+      await api.setIdentityOverride({
+        user_name: name.trim() || null,
+        user_email: email.trim() || null,
+      });
+      setSave({ kind: "ok" });
+      await refresh();
+      setTimeout(
+        () => setSave((s) => (s.kind === "ok" ? { kind: "idle" } : s)),
+        2000
+      );
+    } catch (e: any) {
+      setSave({ kind: "err", msg: String(e?.message ?? e) });
+    }
+  }
+
+  async function reset() {
+    setName("");
+    setEmail("");
+    setSave({ kind: "saving" });
+    try {
+      await api.setIdentityOverride({ user_name: null, user_email: null });
+      setSave({ kind: "ok" });
+      await refresh();
+      setTimeout(
+        () => setSave((s) => (s.kind === "ok" ? { kind: "idle" } : s)),
+        2000
+      );
+    } catch (e: any) {
+      setSave({ kind: "err", msg: String(e?.message ?? e) });
+    }
+  }
+
+  function defaultSourceLabel(kind: "name" | "email"): string {
+    if (!view) return "";
+    if (kind === "name") {
+      if (view.git_name) return `Git: ${view.git_name}`;
+      return `OS 用户名: ${view.os_user}`;
+    }
+    if (view.git_email) return `Git: ${view.git_email}`;
+    return `${view.os_user}@${view.hostname}.local`;
+  }
+
+  return (
+    <section className="bg-card border border-border rounded-lg p-5">
+      <header className="flex items-center gap-2 mb-1">
+        <UserCircle2 className="w-4 h-4 text-muted-foreground" />
+        <h2 className="text-base font-medium text-foreground">用户身份</h2>
+      </header>
+      <p className="text-sm text-muted-foreground mb-4">
+        当前上报使用的姓名和邮箱。默认从 Git 全局配置读取，没有则用计算机名兜底。
+        如果显示不准确，可在下方手动订正；保存后下一轮上报立即生效。
+      </p>
+
+      {view && (
+        <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2 mb-4">
+          目前会上报为
+          <span className="font-mono text-foreground mx-1">
+            {view.effective_name}
+          </span>
+          &lt;
+          <span className="font-mono text-foreground">{view.effective_email}</span>
+          &gt;
+        </div>
+      )}
+
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">
+            姓名（留空则使用：{defaultSourceLabel("name")}）
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={defaultSourceLabel("name")}
+            className="w-full bg-muted text-foreground text-sm rounded-md px-3 py-2 border border-border focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground block mb-1">
+            邮箱（留空则使用：{defaultSourceLabel("email")}）
+          </label>
+          <input
+            type="text"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder={defaultSourceLabel("email")}
+            className="w-full bg-muted text-foreground text-sm rounded-md px-3 py-2 border border-border focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+          />
+          <div className="text-xs text-muted-foreground mt-1">
+            服务端按邮箱识别用户。改邮箱会被视作新身份，历史用量不会迁移。
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 mt-4">
+        <button
+          onClick={persist}
+          disabled={save.kind === "saving"}
+          className="flex items-center gap-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-md px-4 py-2 hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        >
+          <Save className="w-4 h-4" />
+          保存
+        </button>
+        <button
+          onClick={reset}
+          disabled={save.kind === "saving" || (!view?.override_name && !view?.override_email && !name && !email)}
+          className="flex items-center gap-1.5 text-sm text-muted-foreground rounded-md px-3 py-2 border border-border hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title="清除订正，使用默认值"
+        >
+          <RotateCcw className="w-4 h-4" />
+          重置
+        </button>
+        <div className="ml-auto h-5 text-xs flex items-center gap-1.5">
+          {save.kind === "saving" && (
+            <span className="text-muted-foreground">保存中…</span>
+          )}
+          {save.kind === "ok" && (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-500" />
+              <span className="text-emerald-500">已保存</span>
+            </>
+          )}
+          {save.kind === "err" && (
+            <>
+              <AlertCircle className="w-3.5 h-3.5 text-destructive" />
+              <span className="text-destructive">{save.msg}</span>
+            </>
+          )}
+        </div>
       </div>
     </section>
   );

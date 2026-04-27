@@ -299,3 +299,24 @@ pub fn get_upload_blocklist() -> crate::blocklist::UploadBlocklist {
 pub fn set_upload_blocklist(blocklist: crate::blocklist::UploadBlocklist) -> Result<(), String> {
     crate::blocklist::save(&blocklist)
 }
+
+/// 读取当前生效的身份信息：override / git / os fallback 全套。
+/// 前端用来显示"目前会上报为 X，来源是 git 配置"等提示。
+#[tauri::command]
+pub fn get_identity_view() -> Value {
+    crate::report::current_identity_view()
+}
+
+/// 读取用户保存的 identity override（不含 fallback）。
+#[tauri::command]
+pub fn get_identity_override() -> crate::identity::IdentityOverride {
+    crate::identity::load()
+}
+
+/// 覆写 identity override。空串/None 表示清除该字段、回退到默认值。
+#[tauri::command]
+pub fn set_identity_override(
+    identity: crate::identity::IdentityOverride,
+) -> Result<(), String> {
+    crate::identity::save(&identity)
+}

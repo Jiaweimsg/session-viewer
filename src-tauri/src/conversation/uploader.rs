@@ -152,6 +152,26 @@ fn dead_letter_file() -> Option<PathBuf> {
     Some(dir.join("conversation-errors.log"))
 }
 
+/// 循环诊断日志：每轮 cycle 与每次 batch 的结果都写一行。
+/// Windows 上 release build 没有 console，eprintln! 看不见 —— 这个文件是
+/// 用户/我们排查上报失败时的唯一可见入口。
+/// 路径：`{state_dir}/conversation-cycle.log`。
+fn cycle_log_file() -> Option<PathBuf> {
+    let base = dirs::data_dir().or_else(dirs::config_dir)?;
+    let dir = base.join("session-viewer");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("conversation-cycle.log"))
+}
+
+fn log_cycle(line: &str) {
+    eprintln!("{}", line);
+    let Some(path) = cycle_log_file() else { return };
+    use std::io::Write;
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else { return };
+    let ts = chrono::Utc::now().to_rfc3339();
+    let _ = writeln!(f, "{} {}", ts, line);
+}
+
 fn log_dead_letter(batch: &[PendingMessage], err: &str) {
     let Some(path) = dead_letter_file() else { return };
     use std::io::Write;
@@ -171,10 +191,15 @@ fn log_dead_letter(batch: &[PendingMessage], err: &str) {
 /// needed).
 pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
     let url = format!("{}/api/conversations", server_url.trim_end_matches('/'));
+    log_cycle(&format!("[Conversation] cycle start url={} tools={:?}", url, tools));
     let client = reqwest::Client::builder()
         .no_proxy()
         .build()
-        .map_err(|e| format!("client build: {}", e))?;
+        .map_err(|e| {
+            let msg = format!("client build: {}", e);
+            log_cycle(&format!("[Conversation] FATAL {}", msg));
+            msg
+        })?;
 
     let email = crate::report::get_user_email();
     let name = crate::report::get_user_name();
@@ -189,10 +214,11 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
             "codex" => crate::conversation::codex_scanner::scan_all(&state_snapshot),
             "cursor" => crate::conversation::cursor_scanner::scan_all(&state_snapshot),
             other => {
-                eprintln!("[Conversation] unknown tool '{}', skipping", other);
+                log_cycle(&format!("[Conversation] unknown tool '{}', skipping", other));
                 continue;
             }
         };
+        log_cycle(&format!("[Conversation/{}] scanned {} pending messages", tool, pending.len()));
         if pending.is_empty() {
             continue;
         }
@@ -203,12 +229,12 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
             .into_iter()
             .partition(|p| !blocklist.is_blocked(&p.message.cwd));
         if !blocked.is_empty() {
-            eprintln!(
+            log_cycle(&format!(
                 "[Conversation/{}] blocklist filtered {} of {} messages",
                 tool,
                 blocked.len(),
                 total_pending
-            );
+            ));
             match tool {
                 "cursor" => {
                     crate::conversation::cursor_scanner::advance_marks(
@@ -238,7 +264,7 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
                     state_snapshot.last_scan_at = Some(chrono::Utc::now().to_rfc3339());
                     state::save(&state_snapshot);
                     total += n;
-                    eprintln!("[Conversation/{}] uploaded {} messages", tool, n);
+                    log_cycle(&format!("[Conversation/{}] uploaded {} messages", tool, n));
                 }
                 Err(UploadError::ClientError(e)) => {
                     log_dead_letter(&batch, &e);
@@ -250,18 +276,19 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
                         _ => advance_state(&mut state_snapshot, &batch),
                     }
                     state::save(&state_snapshot);
-                    eprintln!("[Conversation/{}] 4xx (dead-lettered): {}", tool, e);
+                    log_cycle(&format!("[Conversation/{}] 4xx dead-lettered: {}", tool, e));
                 }
                 Err(UploadError::Transient(e)) => {
-                    eprintln!(
+                    log_cycle(&format!(
                         "[Conversation/{}] transient error, will retry next cycle: {}",
                         tool, e
-                    );
+                    ));
                     return Err(e);
                 }
             }
         }
     }
+    log_cycle(&format!("[Conversation] cycle end total_uploaded={}", total));
     Ok(total)
 }
 

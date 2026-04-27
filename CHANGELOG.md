@@ -4,6 +4,59 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.8] - 2026-04-27
+
+### Added
+
+#### 系统托盘 + 后台运行
+- 启动后在系统托盘显示图标，菜单：显示主窗口 / 立即上报 / 退出
+- 关闭主窗口不退出进程，最小化到托盘；上报循环继续在后台跑
+- 左键单击托盘图标重新打开窗口；只有从托盘菜单选"退出"才彻底结束进程
+- macOS：Cmd+Q 仍可正常退出
+- 启用 `tauri` crate 的 `tray-icon` feature
+
+#### 开机自启（默认开启）
+- 集成 `tauri-plugin-autostart` 2.5.1（macOS 用 LaunchAgent，Windows 用 Run 注册表）
+- 应用首次启动时自动 enable，登录后无需手动开窗
+- 不在设置页提供开关，避免误关导致后台上报中断
+
+#### 用户身份订正
+- 设置页新增"用户身份"区块：显示当前生效的姓名/邮箱及来源（Git / OS fallback）
+- 允许手动覆盖姓名和邮箱，留空则回退到默认；保存后下一轮上报立即生效
+- 服务端 `upsertUser` 在邮箱不变时会更新姓名，dashboard 自动同步
+- 持久化到 `{state_dir}/identity-override.json`
+- 新增模块 `src-tauri/src/identity.rs` 与 Tauri 命令 `get_identity_view` / `get_identity_override` / `set_identity_override`
+
+### Fixed
+
+#### Windows 兼容
+- 周期性 git 子进程闪现 cmd 黑窗：`report::git_config` 在 Windows 上加 `CREATE_NO_WINDOW (0x0800_0000)` 标志
+- git.exe 启动失败弹"应用程序无法正常启动 (0xC0000142)"系统对话框：进程启动时调 `SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX)`，子进程继承不再弹窗
+- 身份信息（user_name / user_email / machine_id）在进程内 `OnceLock` 缓存，git 子进程每个 key 只 spawn 一次
+- conversation `project` 字段按 `/` 与 `\` 双分隔符 rsplit，Windows cwd 不再退化为整个长路径
+
+### Added (cont.)
+
+#### 上报循环诊断日志
+- 新增 `{state_dir}/session-viewer/conversation-cycle.log`，每轮 conversation 上传的 start / scanned / blocklist / batch 结果 / cycle end 都落盘
+- 解决 Windows release build 无 console、无法定位 `eprintln!` 错误的问题
+- 与 `conversation-errors.log`（4xx dead-letter）互补
+
+## [0.5.7] - 2026-04-27
+
+### Fixed
+
+#### Windows 兼容
+- 周期性 git 子进程闪现 cmd 黑窗：`report::git_config` 在 Windows 上加 `CREATE_NO_WINDOW (0x0800_0000)` 标志，5 分钟一次的身份采集不再弹窗
+- conversation `project` 字段提取按 `/` 切割，Windows 上 cwd 是 `C:\…` 时退化为整个长路径：改为同时按 `/` 与 `\` rsplit
+
+### Added
+
+#### 上报循环诊断日志
+- 新增 `{state_dir}/session-viewer/conversation-cycle.log`，每轮 conversation 上传的 start / scanned / blocklist / batch 结果 / cycle end 都落盘
+- 解决 Windows release build 无 console、无法定位 `eprintln!` 错误的问题
+- 与 `conversation-errors.log`（4xx dead-letter）互补
+
 ## [0.5.6] - 2026-04-27
 
 ### Added

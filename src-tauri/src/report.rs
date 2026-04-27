@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 /// A single usage record to be sent to the server
@@ -36,10 +37,18 @@ pub struct ReportResponse {
 }
 
 /// Read a value from global git config; empty/missing → None.
+/// On Windows we set `CREATE_NO_WINDOW` (0x0800_0000) so the periodic
+/// 5-min spawn inside `send_all_reports` doesn't flash a cmd window.
 fn git_config(key: &str) -> Option<String> {
-    std::process::Command::new("git")
-        .args(["config", "--global", key])
-        .output()
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["config", "--global", key]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
@@ -56,26 +65,79 @@ fn get_os_username() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// User email: git config first (devs), fall back to `{os_user}@{hostname}.local`
-/// so non-dev roles (PM/QA) remain identifiable by machine owner.
+/// User email: identity override → cached git config → `{os_user}@{hostname}.local`.
+/// Override 让用户在设置页订正不准确的 hostname/git 身份；保存后下一轮上报立即生效。
 pub fn get_user_email() -> String {
-    if let Some(email) = git_config("user.email") {
+    if let Some(v) = crate::identity::load().user_email {
+        if !v.trim().is_empty() {
+            return v.trim().to_string();
+        }
+    }
+    if let Some(email) = cached_git_config("user.email") {
         return email;
     }
     format!("{}@{}.local", get_os_username(), get_machine_id())
 }
 
-/// User name: git config first, fall back to OS username.
+/// User name: identity override → cached git config → OS username.
 pub fn get_user_name() -> String {
-    git_config("user.name").unwrap_or_else(get_os_username)
+    if let Some(v) = crate::identity::load().user_name {
+        if !v.trim().is_empty() {
+            return v.trim().to_string();
+        }
+    }
+    cached_git_config("user.name").unwrap_or_else(get_os_username)
 }
 
-/// Get machine hostname
+/// Get machine hostname (cached, hostname doesn't change at runtime).
 pub fn get_machine_id() -> String {
-    hostname::get()
-        .ok()
-        .and_then(|h| h.into_string().ok())
-        .unwrap_or_else(|| "unknown".to_string())
+    static CACHE: OnceLock<String> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            hostname::get()
+                .ok()
+                .and_then(|h| h.into_string().ok())
+                .unwrap_or_else(|| "unknown".to_string())
+        })
+        .clone()
+}
+
+/// `git config --global {key}` with per-key OnceLock cache. We only spawn `git`
+/// once per process for each key — Windows users with broken git installs
+/// (0xC0000142) won't keep paying the spawn cost on every 5-min cycle.
+fn cached_git_config(key: &str) -> Option<String> {
+    match key {
+        "user.email" => {
+            static CACHE: OnceLock<Option<String>> = OnceLock::new();
+            CACHE.get_or_init(|| git_config(key)).clone()
+        }
+        "user.name" => {
+            static CACHE: OnceLock<Option<String>> = OnceLock::new();
+            CACHE.get_or_init(|| git_config(key)).clone()
+        }
+        _ => git_config(key),
+    }
+}
+
+/// Returns the values that *would* be reported right now, broken down by
+/// source. Used by the settings page to show "currently using X (from git /
+/// override / fallback)" hints.
+pub fn current_identity_view() -> serde_json::Value {
+    let override_ = crate::identity::load();
+    let git_email = cached_git_config("user.email");
+    let git_name = cached_git_config("user.name");
+    let os_user = get_os_username();
+    let host = get_machine_id();
+    serde_json::json!({
+        "effective_email": get_user_email(),
+        "effective_name": get_user_name(),
+        "override_email": override_.user_email,
+        "override_name": override_.user_name,
+        "git_email": git_email,
+        "git_name": git_name,
+        "os_user": os_user,
+        "hostname": host,
+    })
 }
 
 /// Get client version from Cargo.toml at compile time

@@ -79,3 +79,31 @@ export async function getUploadBlocklist(): Promise<UploadBlocklist> {
 export async function setUploadBlocklist(blocklist: UploadBlocklist): Promise<void> {
   return invoke<void>("set_upload_blocklist", { blocklist });
 }
+
+export interface IdentityOverride {
+  user_name?: string | null;
+  user_email?: string | null;
+}
+
+export interface IdentityView {
+  effective_email: string;
+  effective_name: string;
+  override_email: string | null;
+  override_name: string | null;
+  git_email: string | null;
+  git_name: string | null;
+  os_user: string;
+  hostname: string;
+}
+
+export async function getIdentityView(): Promise<IdentityView> {
+  return invoke<IdentityView>("get_identity_view");
+}
+
+export async function getIdentityOverride(): Promise<IdentityOverride> {
+  return invoke<IdentityOverride>("get_identity_override");
+}
+
+export async function setIdentityOverride(identity: IdentityOverride): Promise<void> {
+  return invoke<void>("set_identity_override", { identity });
+}
