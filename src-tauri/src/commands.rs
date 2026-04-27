@@ -320,3 +320,10 @@ pub fn set_identity_override(
 ) -> Result<(), String> {
     crate::identity::save(&identity)
 }
+
+/// 重置 conversation 上报状态：删除 conversation-state.json，下一轮 cycle 会
+/// fresh scan 全部历史。配合服务端 uuid 去重，重复消息不会落盘。
+#[tauri::command]
+pub fn reset_conversation_state() -> Result<(), String> {
+    crate::conversation::state::reset()
+}

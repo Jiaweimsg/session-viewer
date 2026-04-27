@@ -107,3 +107,7 @@ export async function getIdentityOverride(): Promise<IdentityOverride> {
 export async function setIdentityOverride(identity: IdentityOverride): Promise<void> {
   return invoke<void>("set_identity_override", { identity });
 }
+
+export async function resetConversationState(): Promise<void> {
+  return invoke<void>("reset_conversation_state");
+}

@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.9] - 2026-04-27
+
+### Added
+
+#### 重置对话上报状态
+- 设置页"高级"区块新增"重置对话上报状态"按钮（带二次确认）
+- 删除 `conversation-state.json` 后下一轮 cycle 会重新 fresh scan 全部历史 jsonl
+- 用于排错：当 dashboard 看不到对话内容、但用量正常时（typically state offset 已被推进到 EOF 但服务端那边数据缺失）
+- 新增 Tauri 命令 `reset_conversation_state`
+
+### Server-side
+
+#### `/api/conversations` uuid 去重
+- POST 处理在写入前先扫描目标 jsonl 中已存在的 uuid 集合，跳过重复 message
+- 配合客户端"重置上报状态"功能：重传全量历史不会在服务端造成重复 NDJSON 行
+- 没有 uuid 的消息（极少数 Codex 合成 ID 缺失场景）依然写入
+- 响应字段新增 `skipped` 计数
+
 ## [0.5.8] - 2026-04-27
 
 ### Added

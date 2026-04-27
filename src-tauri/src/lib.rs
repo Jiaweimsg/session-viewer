@@ -72,6 +72,7 @@ pub fn run() {
             commands::get_identity_view,
             commands::get_identity_override,
             commands::set_identity_override,
+            commands::reset_conversation_state,
         ])
         .on_window_event(|window, event| {
             // 关窗到托盘：拦截关闭请求，隐藏窗口而不是退出进程。

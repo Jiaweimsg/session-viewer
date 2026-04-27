@@ -12,6 +12,7 @@ import {
   FolderOpen,
   UserCircle2,
   RotateCcw,
+  RefreshCw,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import * as api from "../../services/tauriApi";
@@ -39,6 +40,7 @@ export function SettingsPage() {
         <IdentitySection />
         <ManualReportSection />
         <BlocklistSection />
+        <AdvancedSection />
       </div>
     </div>
   );
@@ -527,6 +529,89 @@ function BlocklistSection() {
             <span className="text-destructive">保存失败：{saveState.msg}</span>
           </>
         )}
+      </div>
+    </section>
+  );
+}
+
+// ============ 高级（重置/排错） ============
+
+function AdvancedSection() {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err" | "idle"; text?: string }>({
+    kind: "idle",
+  });
+  const [confirming, setConfirming] = useState(false);
+
+  async function reset() {
+    setBusy(true);
+    setMsg({ kind: "idle" });
+    try {
+      await api.resetConversationState();
+      setMsg({
+        kind: "ok",
+        text: "已重置。下一轮上报（≤5 分钟）会重新扫描并上传全部历史。",
+      });
+      setConfirming(false);
+    } catch (e: any) {
+      setMsg({ kind: "err", text: String(e?.message ?? e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="bg-card border border-border rounded-lg p-5">
+      <header className="flex items-center gap-2 mb-1">
+        <RefreshCw className="w-4 h-4 text-muted-foreground" />
+        <h2 className="text-base font-medium text-foreground">高级</h2>
+      </header>
+      <p className="text-sm text-muted-foreground mb-4">
+        排错用。当 dashboard 看不到对话内容、但用量正常时，重置上报状态可让客户端
+        重新扫描所有历史 jsonl 并重新上传。服务端按 uuid 去重，重复消息不会落盘。
+      </p>
+      <div className="flex items-center gap-2">
+        {confirming ? (
+          <>
+            <button
+              onClick={reset}
+              disabled={busy}
+              className="flex items-center gap-1.5 bg-destructive text-destructive-foreground text-sm font-medium rounded-md px-4 py-2 hover:bg-destructive/90 disabled:opacity-50 transition-colors"
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              确认重置
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              disabled={busy}
+              className="text-sm text-muted-foreground rounded-md px-3 py-2 border border-border hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              取消
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setConfirming(true)}
+            className="flex items-center gap-1.5 text-sm text-foreground rounded-md px-4 py-2 border border-border hover:bg-accent transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            重置对话上报状态
+          </button>
+        )}
+        <div className="ml-auto h-5 text-xs flex items-center gap-1.5">
+          {msg.kind === "ok" && (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+              <span className="text-emerald-500">{msg.text}</span>
+            </>
+          )}
+          {msg.kind === "err" && (
+            <>
+              <AlertCircle className="w-3.5 h-3.5 text-destructive shrink-0" />
+              <span className="text-destructive">{msg.text}</span>
+            </>
+          )}
+        </div>
       </div>
     </section>
   );

@@ -61,6 +61,16 @@ pub fn save(state: &ConversationState) {
     }
 }
 
+/// 删除 state 文件 + 在内存中重置：下一轮 conversation cycle 会重新 fresh
+/// scan 全部历史 jsonl。重传的消息靠服务端 uuid 去重避免重复落盘。
+pub fn reset() -> Result<(), String> {
+    let Some(path) = state_file() else { return Err("no state dir".into()) };
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
