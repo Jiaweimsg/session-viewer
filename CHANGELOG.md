@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.13] - 2026-04-30
+
+### Fixed
+
+#### Linux 编译失败（历史遗留 — 之前每个 release 的 Ubuntu job 都挂在这）
+- `src/copilot/commands/terminal.rs:42` 写法 `vec!["-e", &format!("bash -c '{}'", cmd_str)]` 借用 `format!()` 的临时返回值，立刻被 drop → `error[E0716]: temporary value dropped while borrowed`
+- 这只在 Linux target 编译路径触发（macOS/Windows 走别的 cfg 分支），所以本地 mac 开发看不到
+- 修复方式跟 claude/codex/opencode 已有的写法一致：把 `format!` 提前 bind 到 `let bash_arg`，`vec` 里借用变量
+- 其余三个工具的 terminal.rs 早就是正确写法，只有 copilot 漏了
+
 ## [0.5.12] - 2026-04-30
 
 ### Fixed

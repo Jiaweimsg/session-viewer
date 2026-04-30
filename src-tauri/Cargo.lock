@@ -3609,7 +3609,7 @@ dependencies = [
 
 [[package]]
 name = "session-viewer"
-version = "0.5.12"
+version = "0.5.13"
 dependencies = [
  "chrono",
  "dirs 6.0.0",

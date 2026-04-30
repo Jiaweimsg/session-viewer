@@ -35,11 +35,15 @@ pub fn resume_session(session_id: String, cwd: String) -> Result<(), String> {
     {
         use std::os::unix::process::CommandExt;
         let cmd_str = format!("cd '{}' && copilot --resume={}", cwd, session_id);
+        // xfce4-terminal / xterm 的 -e 参数要求一个完整的 shell 表达式，
+        // 不能像 gnome-terminal/konsole 那样把 cmd_str 作为独立 argv。
+        // format! 必须 bind 到变量，否则 &format!() 借用临时值会被立刻 drop（E0716）。
+        let bash_arg = format!("bash -c '{}'", cmd_str);
         let terminals: [(&str, Vec<&str>); 4] = [
             ("gnome-terminal", vec!["--", "bash", "-c", &cmd_str]),
             ("konsole", vec!["-e", "bash", "-c", &cmd_str]),
-            ("xfce4-terminal", vec!["-e", &format!("bash -c '{}'", cmd_str)]),
-            ("xterm", vec!["-e", &format!("bash -c '{}'", cmd_str)]),
+            ("xfce4-terminal", vec!["-e", &bash_arg]),
+            ("xterm", vec!["-e", &bash_arg]),
         ];
         let mut launched = false;
         for (terminal, args) in &terminals {
