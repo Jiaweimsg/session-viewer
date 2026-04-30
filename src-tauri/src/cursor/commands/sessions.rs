@@ -1,7 +1,7 @@
-use serde::Serialize;
 use crate::cursor::parser::project_scanner::{
-    read_composer_headers, count_bubbles, epoch_ms_to_rfc3339,
+    count_bubbles, epoch_ms_to_rfc3339, read_composer_headers,
 };
+use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,9 +46,12 @@ pub fn get_sessions(project_key: String) -> Result<Vec<CursorSession>, String> {
             let ws = h.workspace_path.as_deref().unwrap_or("(no workspace)");
             ws == target
         })
-        .map(|h| {
+        .filter_map(|h| {
             let msg_count = count_bubbles(&h.composer_id);
-            CursorSession {
+            if !has_visible_session_content(h.subtitle.as_deref(), msg_count) {
+                return None;
+            }
+            Some(CursorSession {
                 session_id: h.composer_id,
                 name: h.name,
                 mode: h.unified_mode,
@@ -57,10 +60,36 @@ pub fn get_sessions(project_key: String) -> Result<Vec<CursorSession>, String> {
                 created: h.created_at.map(epoch_ms_to_rfc3339),
                 modified: h.last_updated_at.map(epoch_ms_to_rfc3339),
                 is_archived: h.is_archived,
-            }
+            })
         })
         .collect();
 
     sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
     Ok(sessions)
+}
+
+pub(super) fn has_visible_session_content(
+    first_prompt: Option<&str>,
+    message_count: usize,
+) -> bool {
+    message_count > 0 || first_prompt.map(|p| !p.trim().is_empty()).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hides_untitled_empty_cursor_sessions() {
+        assert!(!super::has_visible_session_content(None, 0));
+        assert!(!super::has_visible_session_content(Some(""), 0));
+        assert!(!super::has_visible_session_content(Some("  "), 0));
+    }
+
+    #[test]
+    fn keeps_cursor_sessions_with_messages_or_title() {
+        assert!(super::has_visible_session_content(None, 1));
+        assert!(super::has_visible_session_content(
+            Some("Investigate bug"),
+            0
+        ));
+    }
 }

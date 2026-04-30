@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
-use serde::Serialize;
+
+use crate::cursor::commands::sessions::has_visible_session_content;
 use crate::cursor::parser::project_scanner::{
-    read_composer_headers, count_bubbles, epoch_ms_to_rfc3339,
+    count_bubbles, epoch_ms_to_rfc3339, read_composer_headers,
 };
+use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,37 +26,52 @@ pub fn get_projects() -> Result<Vec<CursorProject>, String> {
     // Group by workspace path
     let mut by_ws: HashMap<String, Vec<_>> = HashMap::new();
     for h in &headers {
-        let ws = h.workspace_path.clone().unwrap_or_else(|| "(no workspace)".to_string());
+        let ws = h
+            .workspace_path
+            .clone()
+            .unwrap_or_else(|| "(no workspace)".to_string());
         by_ws.entry(ws).or_default().push(h);
     }
 
     let mut projects: Vec<CursorProject> = by_ws
         .into_iter()
-        .map(|(ws, sessions)| {
+        .filter_map(|(ws, sessions)| {
+            let visible_sessions: Vec<_> = sessions
+                .iter()
+                .filter_map(|s| {
+                    let msg_count = count_bubbles(&s.composer_id);
+                    if has_visible_session_content(s.subtitle.as_deref(), msg_count) {
+                        Some((s, msg_count))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if visible_sessions.is_empty() {
+                return None;
+            }
+
             let short_name = Path::new(&ws)
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(&ws)
                 .to_string();
 
-            let last_modified = sessions
+            let last_modified = visible_sessions
                 .iter()
-                .filter_map(|s| s.last_updated_at.or(s.created_at))
+                .filter_map(|(s, _)| s.last_updated_at.or(s.created_at))
                 .max()
                 .map(epoch_ms_to_rfc3339);
 
-            let message_count: usize = sessions
-                .iter()
-                .map(|s| count_bubbles(&s.composer_id))
-                .sum();
+            let message_count: usize = visible_sessions.iter().map(|(_, c)| *c).sum();
 
-            CursorProject {
+            Some(CursorProject {
                 cwd: ws,
                 short_name,
-                session_count: sessions.len(),
+                session_count: visible_sessions.len(),
                 last_modified,
                 message_count,
-            }
+            })
         })
         .collect();
 
