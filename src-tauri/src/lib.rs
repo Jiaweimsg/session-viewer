@@ -225,16 +225,21 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .run(|_app_handle, _event| {
             // macOS: 拦截 Dock 图标点击 / "重新打开"事件。我们把关窗映射到 hide()，
             // 默认情况下 macOS 不会再把后续的 Dock 点击转交给我们；显式监听
             // RunEvent::Reopen 才能让 Dock 图标重新唤回主窗口。
-            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
-                if !has_visible_windows {
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                        let _ = window.unminimize();
+            // RunEvent::Reopen 是 macOS-only variant —— Windows/Linux 上根本不存在
+            // 该 variant，必须用 cfg 包住，否则跨平台编译会报 E0599。
+            #[cfg(target_os = "macos")]
+            {
+                if let tauri::RunEvent::Reopen { has_visible_windows, .. } = _event {
+                    if !has_visible_windows {
+                        if let Some(window) = _app_handle.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.unminimize();
+                        }
                     }
                 }
             }

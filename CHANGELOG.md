@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.12] - 2026-04-30
+
+### Fixed
+
+#### Windows / Linux 编译失败（0.5.11 release 中 Windows 包缺失）
+- `RunEvent::Reopen` 是 macOS-only variant，0.5.11 写法在 Windows / Linux 上 `error[E0599]: no variant named Reopen found for enum RunEvent`，导致 GitHub Actions release Windows job 失败
+- 用 `#[cfg(target_os = "macos")]` 包住 Reopen 处理 block，闭包参数加 `_` 前缀避免 unused warning
+- 行为不变：macOS Dock 点击仍可重新唤回主窗口
+
 ## [0.5.11] - 2026-04-30
 
 ### Fixed
