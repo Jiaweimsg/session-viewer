@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.11] - 2026-04-30
+
+### Fixed
+
+#### macOS Dock 图标点击无响应
+- 0.5.8 加入 close-to-tray 后，关窗只 hide 主窗口；macOS 上 Dock 图标点击会触发 `RunEvent::Reopen`，但我们没监听，导致用户只能从托盘菜单/图标重新打开窗口
+- 改用 `Builder::build()` + `app.run(|app, event| ...)` 形式监听 `Reopen` 事件，在没可见窗口时 show + focus + unminimize 主窗口
+- macOS 用户现在可以从 Dock 图标重新唤回窗口，符合系统约定
+
 ## [0.5.10] - 2026-04-27
 
 ### Fixed

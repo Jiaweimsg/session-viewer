@@ -223,8 +223,22 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // macOS: 拦截 Dock 图标点击 / "重新打开"事件。我们把关窗映射到 hide()，
+            // 默认情况下 macOS 不会再把后续的 Dock 点击转交给我们；显式监听
+            // RunEvent::Reopen 才能让 Dock 图标重新唤回主窗口。
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+                if !has_visible_windows {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = window.unminimize();
+                    }
+                }
+            }
+        });
 }
 
 /// Windows: 关闭系统级 critical-error 弹窗（`SEM_FAILCRITICALERRORS`）和
