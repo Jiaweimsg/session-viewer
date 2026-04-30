@@ -17,7 +17,23 @@ export function ProjectsPage() {
     if (activeTool === "codex") {
       return encodeURIComponent(project.cwd);
     }
+    if (activeTool === "opencode") {
+      return project.id;
+    }
+    if (activeTool === "copilot" || activeTool === "cursor") {
+      return encodeURIComponent(project.cwd);
+    }
     return project.encodedName;
+  };
+
+  const getProjectPath = (project: any): string => {
+    if (activeTool === "codex" || activeTool === "copilot" || activeTool === "cursor") {
+      return project.cwd;
+    }
+    if (activeTool === "opencode") {
+      return project.worktree;
+    }
+    return project.displayPath;
   };
 
   return (
@@ -50,9 +66,9 @@ export function ProjectsPage() {
                     </h3>
                     <p
                       className="text-xs text-muted-foreground truncate mt-1"
-                      title={activeTool === "codex" ? project.cwd : project.displayPath}
+                      title={getProjectPath(project)}
                     >
-                      {activeTool === "codex" ? project.cwd : project.displayPath}
+                      {getProjectPath(project)}
                     </p>
                     <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground flex-wrap">
                       <span className="flex items-center gap-1">
