@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use crate::opencode::models::project::{ProjectIndexEntry, ProjectMetadata};
+use crate::opencode::models::project::ProjectIndexEntry;
 use crate::opencode::parser::json_parser::parse_project;
 use crate::opencode::parser::session_scanner::{
     get_project_dir, scan_project_hashes, scan_session_files, short_name_from_path,

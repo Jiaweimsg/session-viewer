@@ -27,6 +27,7 @@ impl ConversationState {
         self.file_offsets.insert(path, offset);
     }
 
+    #[allow(dead_code)]
     pub fn remove(&mut self, path: &Path) {
         self.file_offsets.remove(path);
     }

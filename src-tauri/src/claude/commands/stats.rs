@@ -401,7 +401,7 @@ pub fn get_advanced_stats() -> Result<AdvancedStats, String> {
             output_tokens: output,
         })
         .collect();
-    project_token_ranking.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    project_token_ranking.sort_by_key(|b| std::cmp::Reverse(b.total_tokens));
     project_token_ranking.truncate(10);
 
     // Build tool call ranking (top 15)
@@ -412,7 +412,7 @@ pub fn get_advanced_stats() -> Result<AdvancedStats, String> {
             call_count: count,
         })
         .collect();
-    tool_call_ranking.sort_by(|a, b| b.call_count.cmp(&a.call_count));
+    tool_call_ranking.sort_by_key(|b| std::cmp::Reverse(b.call_count));
     tool_call_ranking.truncate(15);
 
     // Build session efficiency

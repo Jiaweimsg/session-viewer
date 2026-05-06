@@ -73,8 +73,7 @@ fn is_retry_text(text: &str) -> bool {
     // English patterns (word-boundary approximation: must be followed by end / whitespace / punct)
     const EN: &[&str] = &["retry", "try again", "again", "no", "continue", "go on"];
     for p in EN {
-        if lower.starts_with(p) {
-            let rest = &lower[p.len()..];
+        if let Some(rest) = lower.strip_prefix(p) {
             if rest.is_empty() || rest.starts_with(|c: char| !c.is_alphanumeric()) {
                 return true;
             }
@@ -179,7 +178,7 @@ pub fn scan_one_file(
             .map(String::from);
 
         let project = cwd
-            .rsplit(|c: char| c == '/' || c == '\\')
+            .rsplit(['/', '\\'])
             .find(|s| !s.is_empty())
             .unwrap_or("unknown")
             .to_string();

@@ -95,7 +95,7 @@ pub fn get_sessions_grouped(project_id: String) -> Result<Vec<SessionGroup>, Str
         if let Some(ref parent_id) = session.parent_id {
             child_map
                 .entry(parent_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(session);
         } else {
             root_sessions.push(session);

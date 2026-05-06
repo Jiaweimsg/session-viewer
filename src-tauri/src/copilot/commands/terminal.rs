@@ -35,11 +35,12 @@ pub fn resume_session(session_id: String, cwd: String) -> Result<(), String> {
     {
         use std::os::unix::process::CommandExt;
         let cmd_str = format!("cd '{}' && copilot --resume={}", cwd, session_id);
+        let bash_cmd = format!("bash -c '{}'", cmd_str);
         let terminals: [(&str, Vec<&str>); 4] = [
             ("gnome-terminal", vec!["--", "bash", "-c", &cmd_str]),
             ("konsole", vec!["-e", "bash", "-c", &cmd_str]),
-            ("xfce4-terminal", vec!["-e", &format!("bash -c '{}'", cmd_str)]),
-            ("xterm", vec!["-e", &format!("bash -c '{}'", cmd_str)]),
+            ("xfce4-terminal", vec!["-e", &bash_cmd]),
+            ("xterm", vec!["-e", &bash_cmd]),
         ];
         let mut launched = false;
         for (terminal, args) in &terminals {

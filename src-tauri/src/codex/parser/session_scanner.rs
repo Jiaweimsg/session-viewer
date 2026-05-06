@@ -91,7 +91,7 @@ pub fn short_name_from_path(path: &str) -> String {
 
 /// Parse date from a file path like .../2025/01/15/rollout-xxx.jsonl
 /// Returns "2025-01-15"
-pub fn extract_date_from_path(path: &PathBuf) -> Option<String> {
+pub fn extract_date_from_path(path: &std::path::Path) -> Option<String> {
     let components: Vec<&str> = path
         .components()
         .filter_map(|c| c.as_os_str().to_str())
@@ -123,12 +123,11 @@ pub fn extract_date_from_path(path: &PathBuf) -> Option<String> {
 
 /// Extract session ID (UUID) from filename like rollout-1234567890-abcdef.jsonl
 #[allow(dead_code)]
-pub fn extract_session_id_from_filename(path: &PathBuf) -> Option<String> {
+pub fn extract_session_id_from_filename(path: &std::path::Path) -> Option<String> {
     let stem = path.file_stem()?.to_str()?;
     // filename format: rollout-<timestamp>-<uuid>
     // We want the UUID part
-    if stem.starts_with("rollout-") {
-        let rest = &stem["rollout-".len()..];
+    if let Some(rest) = stem.strip_prefix("rollout-") {
         // Find the first '-' which separates timestamp from UUID
         if let Some(pos) = rest.find('-') {
             return Some(rest[pos + 1..].to_string());

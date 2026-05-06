@@ -5,12 +5,7 @@ use std::fs;
 /// Tries XDG-style ~/.local/share/opencode/storage first (Linux/macOS/WSL),
 /// then falls back to the platform data dir (%APPDATA%\opencode\storage on Windows).
 pub fn get_storage_dir() -> Option<PathBuf> {
-    for candidate in candidate_storage_dirs() {
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
+    candidate_storage_dirs().into_iter().find(|candidate| candidate.exists())
 }
 
 fn candidate_storage_dirs() -> Vec<PathBuf> {

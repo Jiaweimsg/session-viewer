@@ -47,7 +47,7 @@ fn count_messages(events_path: &Path) -> usize {
     let reader = BufReader::new(file);
     reader
         .lines()
-        .filter_map(|l| l.ok())
+        .map_while(Result::ok)
         .filter(|l| l.contains("\"type\":\"user.message\"") || l.contains("\"type\":\"assistant.message\""))
         .count()
 }
@@ -56,7 +56,7 @@ fn count_messages(events_path: &Path) -> usize {
 fn extract_first_prompt(events_path: &Path) -> Option<String> {
     let file = fs::File::open(events_path).ok()?;
     let reader = BufReader::new(file);
-    for line in reader.lines().filter_map(|l| l.ok()) {
+    for line in reader.lines().map_while(Result::ok) {
         if line.contains("\"type\":\"user.message\"") {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                 let content = v["data"]["content"].as_str()?;
