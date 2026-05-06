@@ -13,7 +13,10 @@ import {
   UserCircle2,
   RotateCcw,
   RefreshCw,
+  Info,
+  Github,
 } from "lucide-react";
+import pkg from "../../../package.json";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import * as api from "../../services/tauriApi";
 
@@ -41,6 +44,7 @@ export function SettingsPage() {
         <ManualReportSection />
         <BlocklistSection />
         <AdvancedSection />
+        <AboutSection />
       </div>
     </div>
   );
@@ -348,9 +352,8 @@ function ManualReportSection() {
         </button>
         {status !== "idle" && status !== "loading" && message && (
           <span
-            className={`text-xs flex items-center gap-1.5 ${
-              status === "success" ? "text-emerald-500" : "text-destructive"
-            }`}
+            className={`text-xs flex items-center gap-1.5 ${status === "success" ? "text-emerald-500" : "text-destructive"
+              }`}
           >
             {status === "success" ? (
               <Check className="w-3.5 h-3.5" />
@@ -611,6 +614,45 @@ function AdvancedSection() {
               <span className="text-destructive">{msg.text}</span>
             </>
           )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ============ 关于 ============
+
+function AboutSection() {
+  const openLink = async (url: string) => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-shell');
+      await open(url);
+    } catch (e) {
+      console.error(e);
+      window.open(url, '_blank');
+    }
+  };
+
+  return (
+    <section className="bg-card border border-border rounded-lg p-5">
+      <header className="flex items-center gap-2 mb-4">
+        <Info className="w-4 h-4 text-muted-foreground" />
+        <h2 className="text-base font-medium text-foreground">关于</h2>
+      </header>
+      <div className="flex flex-col gap-3 text-sm">
+        <div className="flex items-center justify-between py-2 border-b border-border/50">
+          <span className="text-muted-foreground">当前版本</span>
+          <span className="font-mono text-foreground font-medium">v{pkg.version}</span>
+        </div>
+        <div className="flex items-center justify-between py-2">
+          <span className="text-muted-foreground">代码仓库</span>
+          <button
+            onClick={() => openLink("https://github.com/Jiaweimsg/session-viewer")}
+            className="flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors"
+          >
+            <Github className="w-4 h-4" />
+            <span className="font-mono">Jiaweimsg/session-viewer</span>
+          </button>
         </div>
       </div>
     </section>
