@@ -623,6 +623,14 @@ function AdvancedSection() {
 // ============ 关于 ============
 
 function AboutSection() {
+  const [checking, setChecking] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{
+    hasUpdate: boolean;
+    latestVersion?: string;
+    url?: string;
+    error?: string;
+  } | null>(null);
+
   const openLink = async (url: string) => {
     try {
       const { open } = await import('@tauri-apps/plugin-shell');
@@ -630,6 +638,36 @@ function AboutSection() {
     } catch (e) {
       console.error(e);
       window.open(url, '_blank');
+    }
+  };
+
+  const checkForUpdates = async () => {
+    setChecking(true);
+    setUpdateInfo(null);
+    try {
+      const res = await fetch("https://api.github.com/repos/Jiaweimsg/session-viewer/releases/latest");
+      if (!res.ok) {
+        throw new Error("网络请求失败");
+      }
+      const data = await res.json();
+      const latestTag = data.tag_name;
+      const htmlUrl = data.html_url;
+
+      const current = `v${pkg.version}`;
+      let latest = latestTag;
+      if (!latest.startsWith('v')) {
+        latest = `v${latest}`;
+      }
+
+      if (latest !== current) {
+        setUpdateInfo({ hasUpdate: true, latestVersion: latest, url: htmlUrl });
+      } else {
+        setUpdateInfo({ hasUpdate: false });
+      }
+    } catch (e: any) {
+      setUpdateInfo({ hasUpdate: false, error: e.message || "检查失败" });
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -642,8 +680,45 @@ function AboutSection() {
       <div className="flex flex-col gap-3 text-sm">
         <div className="flex items-center justify-between py-2 border-b border-border/50">
           <span className="text-muted-foreground">当前版本</span>
-          <span className="font-mono text-foreground font-medium">v{pkg.version}</span>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-foreground font-medium">v{pkg.version}</span>
+            <button
+              onClick={checkForUpdates}
+              disabled={checking}
+              className="flex items-center gap-1.5 text-xs bg-muted text-foreground px-2 py-1 rounded hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              {checking ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              {checking ? "检查中..." : "检查更新"}
+            </button>
+          </div>
         </div>
+
+        {updateInfo && (
+          <div className="py-2 border-b border-border/50">
+            {updateInfo.error ? (
+              <span className="text-destructive text-xs flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                检查失败: {updateInfo.error}
+              </span>
+            ) : updateInfo.hasUpdate ? (
+              <div className="flex items-center justify-between bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-2 rounded-md">
+                <span className="text-xs">发现新版本: {updateInfo.latestVersion}</span>
+                <button
+                  onClick={() => openLink(updateInfo.url!)}
+                  className="text-xs font-medium underline hover:text-emerald-500"
+                >
+                  前往下载
+                </button>
+              </div>
+            ) : (
+              <span className="text-muted-foreground text-xs flex items-center gap-1">
+                <Check className="w-3 h-3" />
+                当前已是最新版本
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-between py-2">
           <span className="text-muted-foreground">代码仓库</span>
           <button
