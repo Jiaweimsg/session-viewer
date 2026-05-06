@@ -23,7 +23,7 @@ pub fn parse_session_messages(
     {
         let file = fs::File::open(events_path)
             .map_err(|e| format!("Failed to open events.jsonl: {}", e))?;
-        for line in BufReader::new(file).lines().filter_map(|l| l.ok()) {
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
             let trimmed = line.trim();
             if !trimmed.contains("\"type\":\"tool.execution_complete\"") {
                 continue;
@@ -62,7 +62,7 @@ pub fn parse_session_messages(
         };
     }
 
-    for line in BufReader::new(file).lines().filter_map(|l| l.ok()) {
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;

@@ -8,7 +8,6 @@ use crate::codex::models::message::{DisplayContentBlock, DisplayMessage, Paginat
 
 /// Codex JSONL line: {timestamp, type, payload}
 /// type can be: "session_meta", "response_item", "event_msg", "turn_context"
-
 /// Parse a Codex JSONL session file and return paginated display messages.
 pub fn parse_session_messages(
     path: &Path,
@@ -406,6 +405,7 @@ pub fn count_messages(path: &Path) -> u32 {
 ///   input and align semantics with Anthropic (`input_tokens` = fresh only).
 pub struct TokenInfo {
     pub input_tokens: u64,         // cumulative, includes cached
+    #[allow(dead_code)]
     pub cached_input_tokens: u64,  // cumulative cached portion of input_tokens
     pub output_tokens: u64,
     pub total_tokens: u64,

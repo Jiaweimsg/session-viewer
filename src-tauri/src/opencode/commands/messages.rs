@@ -7,8 +7,10 @@ use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 struct MessagePart {
+    #[allow(dead_code)]
     id: String,
     #[serde(rename = "messageID")]
+    #[allow(dead_code)]
     message_id: String,
     #[serde(rename = "type")]
     part_type: String,

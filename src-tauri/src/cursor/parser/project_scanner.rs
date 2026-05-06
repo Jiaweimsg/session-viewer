@@ -21,6 +21,7 @@ pub fn get_global_state_db() -> Option<PathBuf> {
     get_cursor_user_dir().map(|d| d.join("globalStorage/state.vscdb"))
 }
 
+#[allow(dead_code)]
 pub fn get_workspace_storage_dir() -> Option<PathBuf> {
     get_cursor_user_dir().map(|d| d.join("workspaceStorage"))
 }
@@ -60,6 +61,7 @@ pub struct TokenCount {
 }
 
 /// Read workspace.json from a hashed workspace dir to get the project folder path
+#[allow(dead_code)]
 pub fn read_workspace_folder(ws_dir: &std::path::Path) -> Option<String> {
     let ws_json = ws_dir.join("workspace.json");
     let content = std::fs::read_to_string(&ws_json).ok()?;
@@ -249,13 +251,13 @@ pub fn read_bubbles(composer_id: &str) -> Vec<CursorBubble> {
 
         let text = bv.get("text").and_then(|t| t.as_str()).map(|s| s.to_string());
         let created_at = bv.get("createdAt").and_then(|c| c.as_str()).map(|s| s.to_string());
-        let token_count = bv.get("tokenCount").and_then(|tc| {
+        let token_count = bv.get("tokenCount").map(|tc| {
             let input = tc.get("inputTokens").and_then(|t| t.as_u64()).unwrap_or(0);
             let output = tc.get("outputTokens").and_then(|t| t.as_u64()).unwrap_or(0);
-            Some(TokenCount {
+            TokenCount {
                 input_tokens: input,
                 output_tokens: output,
-            })
+            }
         });
         let model_name = bv.get("modelInfo")
             .and_then(|mi| mi.get("modelName"))

@@ -144,7 +144,7 @@ pub fn get_stats() -> Result<CursorStats, String> {
         .into_iter()
         .map(|(mode, count)| ModeEntry { mode, count })
         .collect();
-    mode_distribution.sort_by(|a, b| b.count.cmp(&a.count));
+    mode_distribution.sort_by_key(|b| std::cmp::Reverse(b.count));
 
     // Archived vs active
     let archived_sessions = headers.iter().filter(|h| h.is_archived).count();
@@ -193,7 +193,7 @@ pub fn get_stats() -> Result<CursorStats, String> {
         let mut session_output: u64 = 0;
 
         // Session date from header
-        let session_date = header.created_at.and_then(|ms| date_from_epoch_ms(ms));
+        let session_date = header.created_at.and_then(date_from_epoch_ms);
 
         // Register session in daily activity (skip overlap — transcript loop handles it)
         if !has_transcript {
@@ -332,7 +332,7 @@ pub fn get_stats() -> Result<CursorStats, String> {
             message_count: mc,
         })
         .collect();
-    project_ranking.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    project_ranking.sort_by_key(|b| std::cmp::Reverse(b.total_tokens));
     project_ranking.truncate(10);
 
     // Build session efficiency
@@ -376,7 +376,7 @@ pub fn get_stats() -> Result<CursorStats, String> {
         .into_iter()
         .map(|(model, request_count)| ModelUsageEntry { model, request_count })
         .collect();
-    model_usage.sort_by(|a, b| b.request_count.cmp(&a.request_count));
+    model_usage.sort_by_key(|b| std::cmp::Reverse(b.request_count));
 
     Ok(CursorStats {
         total_sessions: bubble_session_count - overlap + transcript_session_count,

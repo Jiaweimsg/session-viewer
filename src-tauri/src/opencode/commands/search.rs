@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::opencode::parser::json_parser::parse_message;
-use crate::opencode::parser::session_scanner::{get_message_dir, scan_all_session_files};
+use crate::opencode::parser::session_scanner::get_message_dir;
 
 /// Search result for OpenCode
 #[derive(Debug, Clone, serde::Serialize)]

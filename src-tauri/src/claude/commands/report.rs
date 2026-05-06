@@ -79,6 +79,7 @@ pub fn collect_usage_records() -> Result<Vec<UsageRecord>, String> {
     Ok(records)
 }
 
+#[allow(clippy::type_complexity)]
 fn scan_session_for_report(
     path: &Path,
     project_name: &str,
