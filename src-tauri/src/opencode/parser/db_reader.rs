@@ -36,12 +36,14 @@ pub struct SessionRow {
 
 pub struct MessageRow {
     pub id: String,
+    #[allow(dead_code)]
     pub session_id: String,
     pub time_created: i64,
     pub data: Value,
 }
 
 pub struct PartRow {
+    #[allow(dead_code)]
     pub id: String,
     pub message_id: String,
     pub session_id: String,
