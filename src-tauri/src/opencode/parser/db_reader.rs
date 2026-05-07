@@ -173,7 +173,7 @@ pub fn query_messages(conn: &Connection, session_id: &str) -> Vec<MessageRow> {
 
 pub fn query_parts_for_message(conn: &Connection, message_id: &str) -> Vec<PartRow> {
     let mut stmt = match conn.prepare(
-        "SELECT id, message_id, time_created, data \
+        "SELECT id, message_id, session_id, time_created, data \
          FROM part WHERE message_id = ?1 ORDER BY time_created ASC",
     ) {
         Ok(s) => s,
@@ -184,19 +184,20 @@ pub fn query_parts_for_message(conn: &Connection, message_id: &str) -> Vec<PartR
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)?,
-            row.get::<_, String>(3)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
         ))
     })
     .map(|rows| {
         rows.filter_map(|r| r.ok())
-            .filter_map(|(id, mid, tc, data_str)| {
+            .filter_map(|(id, mid, sid, tc, data_str)| {
                 serde_json::from_str::<Value>(&data_str)
                     .ok()
                     .map(|data| PartRow {
                         id,
                         message_id: mid,
-                        session_id: String::new(),
+                        session_id: sid,
                         time_created: tc,
                         data,
                     })
