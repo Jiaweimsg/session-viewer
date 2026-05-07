@@ -87,7 +87,7 @@ pub fn query_parts(conn: &Connection, session_id: &str) -> Vec<PartRow>
 - `input` → `total_input_tokens`
 - `output` → `total_output_tokens`
 - `cache.write` + `cache.read` → cache tokens
-- 按 `data.modelID` 分组，按 `time_created` 日期分桶
+- 按 `data.providerID + "/" + data.modelID` 拼接作 model key 分组，按 `time_created` 日期分桶
 
 ---
 
