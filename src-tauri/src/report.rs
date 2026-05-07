@@ -395,55 +395,55 @@ fn collect_codex_records() -> Result<Vec<UsageRecord>, String> {
 // ── OpenCode collection ──────────────────────────────────────
 
 fn collect_opencode_records() -> Result<Vec<UsageRecord>, String> {
-    use crate::opencode::parser::session_scanner::{scan_all_session_files, get_message_dir};
-    use std::fs;
+    use crate::opencode::parser::db_reader;
 
-    let session_files = scan_all_session_files();
-    if session_files.is_empty() {
+    let conn = match db_reader::open_db() {
+        Ok(c) => c,
+        Err(_) => return Ok(Vec::new()), // DB not found — no OpenCode data
+    };
+
+    // Query all sessions with their project worktree and timestamps
+    let mut stmt = conn.prepare(
+        "SELECT s.id, COALESCE(p.worktree, ''), s.time_updated \
+         FROM session s \
+         LEFT JOIN project p ON s.project_id = p.id \
+         ORDER BY s.time_updated DESC"
+    ).map_err(|e| format!("Failed to prepare opencode session query: {}", e))?;
+
+    let session_rows: Vec<(String, String, i64)> = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })
+    .map_err(|e| format!("Failed to query opencode sessions: {}", e))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    if session_rows.is_empty() {
         return Ok(Vec::new());
     }
 
-    let message_dir = get_message_dir().ok_or("OpenCode message dir not found")?;
     let mut records = Vec::new();
-
-    // Each session file is a JSON with session metadata
-    for path in &session_files {
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        let v: serde_json::Value = match serde_json::from_str(&content) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let session_id = v.get("id").and_then(|i| i.as_str()).unwrap_or("");
-        let project = v.get("worktree").and_then(|w| w.as_str())
-            .map(crate::shared_models::basename)
-            .unwrap_or_else(|| "unknown".to_string());
-
-        // Get date from updatedAt or createdAt
-        let date = v.get("updatedAt").or_else(|| v.get("createdAt"))
-            .and_then(|d| d.as_str())
-            .and_then(|s| s.get(..10))
+    for (session_id, worktree, time_updated_ms) in &session_rows {
+        // Convert ms timestamp to YYYY-MM-DD date string
+        let date = db_reader::ms_to_rfc3339(*time_updated_ms)
+            .get(..10)
             .unwrap_or("")
             .to_string();
 
-        if date.is_empty() || session_id.is_empty() {
+        if date.is_empty() {
             continue;
         }
 
-        // Count messages in message dir
-        let msg_dir = message_dir.join(session_id);
-        let msg_count = if msg_dir.exists() {
-            fs::read_dir(&msg_dir)
-                .map(|e| e.filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().map(|ext| ext == "json").unwrap_or(false))
-                    .count() as u64)
-                .unwrap_or(0)
+        let project = if worktree.is_empty() {
+            "unknown".to_string()
         } else {
-            0
+            crate::shared_models::basename(worktree)
         };
+
+        let msg_count = db_reader::count_messages_for_session(&conn, session_id) as u64;
 
         records.push(UsageRecord {
             date,
