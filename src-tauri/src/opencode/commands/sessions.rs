@@ -1,127 +1,95 @@
-use std::fs;
 use std::collections::HashMap;
-use crate::opencode::models::session::{SessionIndexEntry, SessionGroup};
-use crate::opencode::parser::json_parser::{count_messages, extract_first_prompt, parse_session};
-use crate::opencode::parser::session_scanner::{
-    get_message_dir, scan_session_files, short_name_from_path,
+use rusqlite::Connection;
+
+use crate::opencode::models::session::{SessionGroup, SessionIndexEntry};
+use crate::opencode::parser::db_reader::{
+    count_messages_for_session, open_db, query_messages, query_parts_for_message, query_sessions,
 };
+use crate::shared_models::basename;
 
-/// Get sessions for a specific project
 pub fn get_sessions(project_id: String) -> Result<Vec<SessionIndexEntry>, String> {
-    let session_files = scan_session_files(&project_id);
-    let message_dir_base = get_message_dir()
-        .ok_or_else(|| "Could not find OpenCode message directory".to_string())?;
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(_) => return Ok(vec![]),
+    };
 
-    let mut entries: Vec<SessionIndexEntry> = Vec::new();
+    let rows = query_sessions(&conn, &project_id);
 
-    for session_file in session_files {
-        if let Ok(session_meta) = parse_session(&session_file) {
-            let session_id = session_meta.id.clone();
-            let message_dir = message_dir_base.join(&session_id);
-
-            // Extract first prompt and count messages
-            let first_prompt = if message_dir.exists() {
-                extract_first_prompt(&message_dir)
+    let entries = rows
+        .into_iter()
+        .map(|row| {
+            let first_prompt = get_first_prompt(&conn, &row.id);
+            let message_count = count_messages_for_session(&conn, &row.id);
+            let short_name = if row.directory.is_empty() {
+                "unknown".to_string()
             } else {
-                None
+                basename(&row.directory)
             };
 
-            let message_count = if message_dir.exists() {
-                count_messages(&message_dir)
-            } else {
-                0
-            };
-
-            // Get file timestamps
-            let file_meta = fs::metadata(&session_file).ok();
-            let modified = file_meta.as_ref().and_then(|m| {
-                m.modified().ok().map(|t| {
-                    let d = t
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default();
-                    chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
-                        .map(|dt| dt.to_rfc3339())
-                        .unwrap_or_default()
-                })
-            });
-
-            let created = file_meta.as_ref().and_then(|m| {
-                m.created().ok().map(|t| {
-                    let d = t
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default();
-                    chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
-                        .map(|dt| dt.to_rfc3339())
-                        .unwrap_or_default()
-                })
-            });
-
-            // Try to extract git branch from directory metadata
-            // For now, we'll set it to None as it's not in the session metadata
-            let git_branch = None;
-
-            entries.push(SessionIndexEntry {
-                session_id,
-                project_id: session_meta.project_id.clone(),
-                directory: session_meta.directory.clone(),
-                short_name: short_name_from_path(&session_meta.directory),
-                title: session_meta.title.clone(),
-                slug: session_meta.slug.clone(),
+            SessionIndexEntry {
+                session_id: row.id,
+                project_id: row.project_id,
+                directory: row.directory,
+                short_name,
+                title: row.title,
+                slug: None,
                 first_prompt,
                 message_count,
-                created,
-                modified,
-                git_branch,
-                parent_id: session_meta.parent_id.clone(),  // 添加 parent_id
-            });
-        }
-    }
-
-    // Sort by modified time, most recent first
-    entries.sort_by(|a, b| b.modified.cmp(&a.modified));
+                created: Some(row.created),
+                modified: Some(row.modified),
+                git_branch: None,
+                parent_id: row.parent_id,
+            }
+        })
+        .collect::<Vec<_>>();
 
     Ok(entries)
 }
 
-/// Get sessions grouped by parent-child relationship
 pub fn get_sessions_grouped(project_id: String) -> Result<Vec<SessionGroup>, String> {
     let all_sessions = get_sessions(project_id)?;
-    
+
     let mut root_sessions = Vec::new();
     let mut child_map: HashMap<String, Vec<SessionIndexEntry>> = HashMap::new();
-    
-    // Separate parent and child sessions
+
     for session in all_sessions {
         if let Some(ref parent_id) = session.parent_id {
-            child_map
-                .entry(parent_id.clone())
-                .or_default()
-                .push(session);
+            child_map.entry(parent_id.clone()).or_default().push(session);
         } else {
             root_sessions.push(session);
         }
     }
-    
-    // Build grouped structure
+
     let mut grouped: Vec<SessionGroup> = root_sessions
         .into_iter()
         .map(|root| {
-            let mut sub_sessions = child_map
-                .remove(&root.session_id)
-                .unwrap_or_default();
-            
-            // Sort sub-sessions by created time
+            let mut sub_sessions = child_map.remove(&root.session_id).unwrap_or_default();
             sub_sessions.sort_by(|a, b| a.created.cmp(&b.created));
-            
-            SessionGroup {
-                root_session: root,
-                sub_sessions,
-            }
+            SessionGroup { root_session: root, sub_sessions }
         })
         .collect();
-    
-    // Sort groups by root session modified time
+
     grouped.sort_by(|a, b| b.root_session.modified.cmp(&a.root_session.modified));
-    
+
     Ok(grouped)
+}
+
+fn get_first_prompt(conn: &Connection, session_id: &str) -> Option<String> {
+    let messages = query_messages(conn, session_id);
+
+    let user_msg = messages.iter().find(|m| {
+        m.data.get("role").and_then(|r| r.as_str()) == Some("user")
+    })?;
+
+    let parts = query_parts_for_message(conn, &user_msg.id);
+    let text_part = parts.iter().find(|p| {
+        p.data.get("type").and_then(|t| t.as_str()) == Some("text")
+    })?;
+
+    let text = text_part.data.get("text")?.as_str()?;
+    if text.len() <= 100 {
+        Some(text.to_string())
+    } else {
+        Some(format!("{}...", &text[..100]))
+    }
 }
