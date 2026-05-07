@@ -61,8 +61,15 @@ fn extract_match_context(text: &str, query: &str, context_len: usize) -> String 
     let query_lower = query.to_lowercase();
 
     if let Some(pos) = text_lower.find(&query_lower) {
-        let start = pos.saturating_sub(context_len / 2);
-        let end = std::cmp::min(pos + query_lower.len() + context_len / 2, text.len());
+        let mut start = pos.saturating_sub(context_len / 2);
+        while start > 0 && !text.is_char_boundary(start) {
+            start -= 1;
+        }
+        let raw_end = pos + query_lower.len() + context_len / 2;
+        let mut end = std::cmp::min(raw_end, text.len());
+        while end < text.len() && !text.is_char_boundary(end) {
+            end += 1;
+        }
         let mut snippet = text[start..end].to_string();
         if start > 0 { snippet = format!("...{}", snippet); }
         if end < text.len() { snippet = format!("{}...", snippet); }
