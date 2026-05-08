@@ -55,7 +55,7 @@ export function StatsPage() {
     return <CodexStats stats={stats as CodexTokenSummary} />;
   }
 
-  if (activeTool === "cursor" || activeTool === "copilot") {
+  if (activeTool === "cursor" || activeTool === "copilot" || activeTool === "cursor-cli") {
     return <CursorStatsView stats={stats as CursorStatsType} />;
   }
 

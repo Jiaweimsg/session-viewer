@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.14] - 2026-05-08
+
+### Added
+
+#### Cursor CLI 作为独立工具项
+- 侧边栏下拉新增 `Cursor CLI` 选项，独立于 `Cursor`（IDE）。CLI 来源 `~/.cursor/chats/*/*/store.db`，IDE 来源 `~/.cursor/chats/composer SQLite + agent-transcripts`，两者数据流不再合并
+- 后端新增 `cursor_cli` 模块，提供独立的 projects / sessions / messages / search / stats 命令；复用 `cursor::parser::cli_chats` 数据层
+- 使用统计 `/api/report` 上报新增 `cursor_cli` tool，model 字段固定为 `cursor-cli`，便于 dashboard 区分
+- 会话上报 `/api/conversations` 上报路径拆分：`cursor_scanner::scan_all` 只覆盖 IDE，新增 `scan_all_cli` 覆盖 CLI，分别用 tool=`cursor` 和 tool=`cursor_cli` 上报
+- Dashboard `TOOL_LABELS` 新增 `cursor_cli: 'Cursor CLI'`，「查看问题」按钮白名单同步加入
+
 ## [0.5.13] - 2026-04-30
 
 ### Fixed

@@ -20,14 +20,14 @@ export function ProjectsPage() {
     if (activeTool === "opencode") {
       return project.id;
     }
-    if (activeTool === "copilot" || activeTool === "cursor") {
+    if (activeTool === "copilot" || activeTool === "cursor" || activeTool === "cursor-cli") {
       return encodeURIComponent(project.cwd);
     }
     return project.encodedName;
   };
 
   const getProjectPath = (project: any): string => {
-    if (activeTool === "codex" || activeTool === "copilot" || activeTool === "cursor") {
+    if (activeTool === "codex" || activeTool === "copilot" || activeTool === "cursor" || activeTool === "cursor-cli") {
       return project.cwd;
     }
     if (activeTool === "opencode") {

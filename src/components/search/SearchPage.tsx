@@ -40,9 +40,9 @@ export function SearchPage() {
       navigate(
         `/${activeTool}/projects/${encodeURIComponent(result.cwd)}/session/${encodeURIComponent(result.filePath)}`
       );
-    } else if (activeTool === "cursor") {
+    } else if (activeTool === "cursor" || activeTool === "cursor-cli") {
       navigate(
-        `/${activeTool}/projects/${encodeURIComponent(result.projectName || '')}/session/${result.sessionId}`
+        `/${activeTool}/projects/${encodeURIComponent(result.projectKey || result.projectName || '')}/session/${result.sessionId}`
       );
     } else {
       navigate(
@@ -55,7 +55,7 @@ export function SearchPage() {
     if (activeTool === "codex") {
       return result.shortName;
     }
-    if (activeTool === "cursor") {
+    if (activeTool === "cursor" || activeTool === "cursor-cli") {
       return result.projectName;
     }
     return result.projectName;
@@ -65,6 +65,7 @@ export function SearchPage() {
     if (result.role === "user") return "用户";
     if (activeTool === "codex") return "Codex";
     if (activeTool === "cursor") return "Cursor";
+    if (activeTool === "cursor-cli") return "Cursor CLI";
     return "Claude";
   };
 

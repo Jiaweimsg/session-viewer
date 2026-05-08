@@ -290,6 +290,7 @@ pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
         ("opencode", collect_opencode_records()),
         ("copilot", collect_copilot_records()),
         ("cursor", collect_cursor_records()),
+        ("cursor_cli", collect_cursor_cli_records()),
     ];
 
     for (tool_name, result) in tools {
@@ -584,6 +585,61 @@ fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
         let entry = agg.entry(key).or_insert((0, 0, 0, 0));
         entry.2 += 1;            // session
         entry.3 += msg_count;    // messages
+    }
+
+    Ok(agg.into_iter().map(|((date, project, model), (input, output, sessions, messages))| {
+        UsageRecord {
+            date,
+            project,
+            model,
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            session_count: sessions,
+            message_count: messages,
+        }
+    }).collect())
+}
+
+// ── Cursor CLI collection ────────────────────────────────────
+//
+// `~/.cursor/chats/<project_hash>/<session_id>/store.db` carries no token
+// counts, so we only emit session/message activity. Date is derived from the
+// db file mtime; project from workspace_path (falls back to the project hash
+// directory). Model is fixed to "cursor-cli" so dashboards can distinguish
+// CLI activity from IDE composer/transcript activity reported under "cursor".
+fn collect_cursor_cli_records() -> Result<Vec<UsageRecord>, String> {
+    use crate::cursor::parser::cli_chats;
+
+    type AggKey = (String, String, String);
+    let mut agg: HashMap<AggKey, (u64, u64, u64, u64)> = HashMap::new();
+
+    for session in cli_chats::load_all_sessions() {
+        let modified = match session.modified() {
+            Some(s) => s,
+            None => continue,
+        };
+        let date = if modified.len() >= 10 {
+            modified[..10].to_string()
+        } else {
+            continue;
+        };
+
+        let cwd = session.cwd();
+        let project = crate::shared_models::basename(&cwd);
+        let model = "cursor-cli".to_string();
+
+        let msg_count = session.message_count() as u64;
+        let prompt_count = session.user_prompt_rows_after(0).len() as u64;
+        if msg_count == 0 && prompt_count == 0 {
+            continue;
+        }
+
+        let key = (date, project, model);
+        let entry = agg.entry(key).or_insert((0, 0, 0, 0));
+        entry.2 += 1;
+        entry.3 += msg_count;
     }
 
     Ok(agg.into_iter().map(|((date, project, model), (input, output, sessions, messages))| {

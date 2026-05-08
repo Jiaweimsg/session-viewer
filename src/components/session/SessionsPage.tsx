@@ -34,7 +34,7 @@ export function SessionsPage() {
       ? projects.find((p) => p.cwd === projectKey)
       : activeTool === "copilot"
       ? projects.find((p) => p.cwd === projectKey)
-      : activeTool === "cursor"
+      : activeTool === "cursor" || activeTool === "cursor-cli"
       ? projects.find((p) => p.cwd === projectKey)
       : projects.find((p) => p.encodedName === projectKey);
 
@@ -54,7 +54,7 @@ export function SessionsPage() {
         ? session.cwd
         : activeTool === "copilot"
         ? session.cwd || project?.cwd || null
-        : activeTool === "cursor"
+        : activeTool === "cursor" || activeTool === "cursor-cli"
         ? project?.cwd || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
@@ -74,7 +74,7 @@ export function SessionsPage() {
         ? session.cwd
         : activeTool === "copilot"
         ? session.cwd || project?.cwd || null
-        : activeTool === "cursor"
+        : activeTool === "cursor" || activeTool === "cursor-cli"
         ? project?.cwd || null
         : session.projectPath || project?.displayPath || null;
     if (!workDir) return;
@@ -86,7 +86,7 @@ export function SessionsPage() {
         ? `cd '${workDir}' && codex resume ${session.sessionId}`
         : activeTool === "copilot"
         ? `cd '${workDir}' && copilot --resume=${session.sessionId}`
-        : activeTool === "cursor"
+        : activeTool === "cursor" || activeTool === "cursor-cli"
         // Cursor: macOS 用 open -a Cursor（不依赖 PATH 上的 cursor CLI），
         // Windows/Linux 用 cursor 命令（IDE 安装时默认入 PATH）
         ? (isWindows ? `cursor "${workDir}"` : `open -a Cursor '${workDir}'`)
@@ -104,7 +104,7 @@ export function SessionsPage() {
     if (activeTool === "copilot") {
       return session.sessionId;
     }
-    if (activeTool === "cursor") {
+    if (activeTool === "cursor" || activeTool === "cursor-cli") {
       return session.sessionId;
     }
     return session.sessionId;
@@ -133,7 +133,7 @@ export function SessionsPage() {
                 ? project.cwd
                 : activeTool === "copilot"
                 ? project.cwd
-                : activeTool === "cursor"
+                : activeTool === "cursor" || activeTool === "cursor-cli"
                 ? project.cwd
                 : project.displayPath}
             </p>
@@ -244,10 +244,10 @@ export function SessionsPage() {
                   <button
                     onClick={(e) => handleResume(e, session)}
                     className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-1"
-                    title={activeTool === "cursor" ? "在 Cursor 中打开此 workspace" : "在终端中恢复此会话"}
+                    title={(activeTool === "cursor" || activeTool === "cursor-cli") ? "在 Cursor 中打开此 workspace" : "在终端中恢复此会话"}
                   >
                     <Play className="w-3 h-3" />
-                    {activeTool === "cursor" ? "打开" : "Resume"}
+                    {(activeTool === "cursor" || activeTool === "cursor-cli") ? "打开" : "Resume"}
                   </button>
                   <button
                     onClick={(e) => handleCopy(e, session)}

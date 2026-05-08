@@ -17,6 +17,7 @@ use crate::conversation::codex_scanner::is_system_injection;
 use crate::conversation::scanner::{classify_role_tag, PendingMessage};
 use crate::conversation::state::{ConversationState, CursorMark};
 use crate::conversation::{ConversationMessage, RoleTag};
+use crate::cursor::parser::cli_chats::{self, CliSessionData};
 use crate::cursor::parser::project_scanner::{
     read_bubbles, read_composer_headers, CursorBubble,
 };
@@ -69,12 +70,19 @@ fn backfill_model(bubbles: &[CursorBubble], idx: usize) -> Option<String> {
     None
 }
 
-/// Walk all composer headers; for each composer whose header.last_updated_at has
-/// advanced since the last mark, read its bubbles and emit new user prompts.
+/// Walk all composer headers + Agent transcripts. CLI sessions are scanned by
+/// `scan_all_cli` and reported under the separate `cursor_cli` tool.
 pub fn scan_all(state: &ConversationState) -> Vec<PendingMessage> {
     let mut out = scan_composers(state);
     out.extend(scan_transcripts(state));
     out
+}
+
+/// CLI-only counterpart of `scan_all`: walks `~/.cursor/chats/*/*/store.db`
+/// and emits user prompts past the per-DB rowid watermark in
+/// `state.file_offsets`. Reported under tool=`cursor_cli`.
+pub fn scan_all_cli(state: &ConversationState) -> Vec<PendingMessage> {
+    scan_cli_chats(state)
 }
 
 fn scan_composers(state: &ConversationState) -> Vec<PendingMessage> {
@@ -216,6 +224,63 @@ fn scan_transcripts(state: &ConversationState) -> Vec<PendingMessage> {
     out
 }
 
+fn scan_cli_chats(state: &ConversationState) -> Vec<PendingMessage> {
+    cli_chats::load_all_sessions()
+        .into_iter()
+        .flat_map(|session| {
+            let start = state.offset_for(&session.db_path);
+            pending_from_cli_session(&session, start)
+        })
+        .collect()
+}
+
+pub(crate) fn pending_from_cli_session(
+    session: &CliSessionData,
+    start_rowid: u64,
+) -> Vec<PendingMessage> {
+    let prompts = session.user_prompt_rows_after(start_rowid as i64);
+    if prompts.is_empty() {
+        return Vec::new();
+    }
+
+    let timestamp = cli_chats::epoch_ms_to_rfc3339(session.file_mtime_ms);
+    if timestamp.is_empty() {
+        return Vec::new();
+    }
+
+    let is_fresh_scan = start_rowid == 0;
+    let cwd = session.cwd();
+    let project = crate::shared_models::basename(&cwd);
+    let mut first_emitted = false;
+
+    prompts
+        .into_iter()
+        .map(|(rowid, text)| {
+            let is_first_in_window = !first_emitted;
+            let role_tag = classify_role_tag(&text, is_first_in_window, is_fresh_scan);
+            if role_tag == RoleTag::First {
+                first_emitted = true;
+            }
+            PendingMessage {
+                file: session.db_path.clone(),
+                line_end: rowid as u64,
+                message: ConversationMessage {
+                    uuid: cursor_uuid(&session.session_id, &format!("{}:{}", rowid, text)),
+                    session_id: session.session_id.clone(),
+                    parent_uuid: None,
+                    timestamp: timestamp.clone(),
+                    project: project.clone(),
+                    cwd: cwd.clone(),
+                    git_branch: None,
+                    model: None,
+                    role_tag,
+                    text,
+                },
+            }
+        })
+        .collect()
+}
+
 /// Post-upload: advance state.cursor_marks based on what was in the batch.
 pub fn advance_marks(marks: &mut HashMap<String, CursorMark>, batch: &[PendingMessage]) {
     // composer_id -> (max updated_at observed, max bubble_idx observed)
@@ -248,6 +313,7 @@ pub fn advance_marks(marks: &mut HashMap<String, CursorMark>, batch: &[PendingMe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn cursor_uuid_is_stable() {
@@ -371,5 +437,43 @@ mod tests {
             msg_type: 1, text: Some("x".into()), created_at: None, token_count: None, model_name: None,
         }];
         assert_eq!(backfill_model(&bubbles, 0), None);
+    }
+
+    #[test]
+    fn cli_session_pending_messages_use_db_offsets() {
+        let session = CliSessionData {
+            meta: cli_chats::CliMeta {
+                agent_id: "session-1".into(),
+                name: Some("CLI".into()),
+                mode: Some("default".into()),
+                created_at: Some(1_700_000_000_000),
+            },
+            project_hash: "project-hash".into(),
+            session_id: "session-1".into(),
+            db_path: PathBuf::from("/tmp/store.db"),
+            workspace_path: Some("/Users/me/project".into()),
+            rows: vec![
+                cli_chats::CliBlobRow {
+                    rowid: 1,
+                    value: json!({"role":"user","content":"<user_info>\nWorkspace Path: /Users/me/project\n</user_info>"}),
+                },
+                cli_chats::CliBlobRow {
+                    rowid: 2,
+                    value: json!({"role":"user","content":"<user_query>\nfirst\n</user_query>"}),
+                },
+                cli_chats::CliBlobRow {
+                    rowid: 4,
+                    value: json!({"role":"user","content":"<user_query>\nsecond\n</user_query>"}),
+                },
+            ],
+            file_mtime_ms: 1_700_000_000_000,
+        };
+
+        let pending = pending_from_cli_session(&session, 2);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].line_end, 4);
+        assert_eq!(pending[0].message.text, "second");
+        assert_eq!(pending[0].message.project, "project");
+        assert_eq!(pending[0].message.cwd, "/Users/me/project");
     }
 }

@@ -213,6 +213,7 @@ pub async fn flush(server_url: &str, tools: &[&str]) -> Result<u64, String> {
             "claude_code" => scanner::scan_all(&state_snapshot),
             "codex" => crate::conversation::codex_scanner::scan_all(&state_snapshot),
             "cursor" => crate::conversation::cursor_scanner::scan_all(&state_snapshot),
+            "cursor_cli" => crate::conversation::cursor_scanner::scan_all_cli(&state_snapshot),
             other => {
                 log_cycle(&format!("[Conversation] unknown tool '{}', skipping", other));
                 continue;

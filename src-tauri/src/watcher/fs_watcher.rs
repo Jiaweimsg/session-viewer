@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::claude::parser::path_encoder::get_projects_dir;
 use crate::codex::parser::session_scanner::get_sessions_dir;
+use crate::cursor::parser::cli_chats::get_chats_dir;
 use crate::cursor::parser::project_scanner::get_cursor_user_dir;
 use crate::state::AppState;
 
@@ -20,8 +21,13 @@ pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
     let claude_dir = get_projects_dir();
     let codex_dir = get_sessions_dir();
     let cursor_dir = get_cursor_user_dir();
+    let cursor_chats_dir = get_chats_dir();
 
-    if claude_dir.is_none() && codex_dir.is_none() && cursor_dir.is_none() {
+    if claude_dir.is_none()
+        && codex_dir.is_none()
+        && cursor_dir.is_none()
+        && cursor_chats_dir.is_none()
+    {
         return Err("Could not find any session directories to watch".to_string());
     }
 
@@ -63,19 +69,30 @@ pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
             }
         }
 
+        // Watch Cursor CLI chats directory if it exists
+        if let Some(ref dir) = cursor_chats_dir {
+            if dir.exists() {
+                if let Err(e) = watcher.watch(dir, RecursiveMode::Recursive) {
+                    eprintln!("Failed to watch Cursor chats directory: {}", e);
+                }
+            }
+        }
+
         for event in rx {
             match event {
                 Ok(event) => {
                     // Only emit for relevant file changes
-                    let has_relevant_files = event.paths.iter().any(|p| {
-                        p.extension()
-                            .map(|e| e == "jsonl" || e == "json")
-                            .unwrap_or(false)
-                    });
+                    let has_relevant_files = event.paths.iter().any(is_relevant_session_file);
 
                     if has_relevant_files {
                         // Determine which tool the change belongs to
-                        let tool = determine_tool(&event.paths, &claude_dir, &codex_dir, &cursor_dir);
+                        let tool = determine_tool(
+                            &event.paths,
+                            &claude_dir,
+                            &codex_dir,
+                            &cursor_dir,
+                            &cursor_chats_dir,
+                        );
 
                         // Invalidate stats cache for the affected tool
                         if let Some(state) = app_handle.try_state::<AppState>() {
@@ -108,6 +125,7 @@ fn determine_tool(
     claude_dir: &Option<std::path::PathBuf>,
     codex_dir: &Option<std::path::PathBuf>,
     cursor_dir: &Option<std::path::PathBuf>,
+    cursor_chats_dir: &Option<std::path::PathBuf>,
 ) -> String {
     for path in paths {
         let path_str = path.to_string_lossy();
@@ -126,6 +144,25 @@ fn determine_tool(
                 return "cursor".to_string();
             }
         }
+        if let Some(ref dir) = cursor_chats_dir {
+            if path_str.starts_with(&dir.to_string_lossy().to_string()) {
+                return "cursor".to_string();
+            }
+        }
     }
     "unknown".to_string()
+}
+
+fn is_relevant_session_file(path: &std::path::PathBuf) -> bool {
+    if path
+        .extension()
+        .map(|e| e == "jsonl" || e == "json")
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    matches!(
+        path.file_name().and_then(|n| n.to_str()),
+        Some("store.db" | "store.db-wal" | "store.db-shm")
+    )
 }

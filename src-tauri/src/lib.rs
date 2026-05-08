@@ -3,6 +3,7 @@ mod claude;
 mod codex;
 mod copilot;
 mod cursor;
+mod cursor_cli;
 mod identity;
 mod opencode;
 mod commands;
@@ -130,7 +131,7 @@ pub fn run() {
                             let _ = report::send_all_reports(&server).await;
                             let _ = conversation::uploader::flush(
                                 &server,
-                                &["claude_code", "codex", "cursor"],
+                                &["claude_code", "codex", "cursor", "cursor_cli"],
                             )
                             .await;
                         });
@@ -209,7 +210,7 @@ pub fn run() {
                         eprintln!("[Conversation] skipped (client version blocked)");
                     } else {
                         eprintln!("[Conversation] scanning + uploading to {}", server);
-                        match conversation::uploader::flush(&server, &["claude_code", "codex", "cursor"]).await {
+                        match conversation::uploader::flush(&server, &["claude_code", "codex", "cursor", "cursor_cli"]).await {
                             Ok(n) => eprintln!("[Conversation] cycle ok: {} messages", n),
                             Err(e) => eprintln!("[Conversation] cycle failed: {}", e),
                         }

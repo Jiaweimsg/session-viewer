@@ -43,6 +43,8 @@ export function Sidebar() {
       return encodeURIComponent(project.cwd);
     } else if (activeTool === "cursor") {
       return encodeURIComponent(project.cwd);
+    } else if (activeTool === "cursor-cli") {
+      return encodeURIComponent(project.cwd);
     }
     return project.encodedName;
   };
@@ -55,6 +57,8 @@ export function Sidebar() {
     } else if (activeTool === "copilot") {
       return project.cwd;
     } else if (activeTool === "cursor") {
+      return project.cwd;
+    } else if (activeTool === "cursor-cli") {
       return project.cwd;
     }
     return project.displayPath;
@@ -80,6 +84,7 @@ export function Sidebar() {
             <option value="opencode">OpenCode</option>
             <option value="copilot">Copilot</option>
             <option value="cursor">Cursor</option>
+            <option value="cursor-cli">Cursor CLI</option>
           </select>
           <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
         </div>

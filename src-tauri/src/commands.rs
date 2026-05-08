@@ -43,6 +43,10 @@ pub fn get_projects(tool: String) -> Result<Value, String> {
             let result = crate::cursor::commands::projects::get_projects()?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "cursor-cli" => {
+            let result = crate::cursor_cli::commands::projects::get_projects()?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
@@ -76,6 +80,10 @@ pub fn get_sessions(tool: String, project_key: String) -> Result<Value, String> 
         }
         "cursor" => {
             let result = crate::cursor::commands::sessions::get_sessions(project_key)?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
+        "cursor-cli" => {
+            let result = crate::cursor_cli::commands::sessions::get_sessions(project_key)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         _ => Err(format!("Unknown tool: {}", tool)),
@@ -151,6 +159,14 @@ pub fn get_messages(
             )?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "cursor-cli" => {
+            let result = crate::cursor_cli::commands::messages::get_messages(
+                session_key,
+                page,
+                page_size,
+            )?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }
@@ -177,6 +193,10 @@ pub fn global_search(tool: String, query: String, max_results: usize) -> Result<
         }
         "cursor" => {
             let result = crate::cursor::commands::search::global_search(query, max_results)?;
+            serde_json::to_value(result).map_err(|e| e.to_string())
+        }
+        "cursor-cli" => {
+            let result = crate::cursor_cli::commands::search::global_search(query, max_results)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         _ => Err(format!("Unknown tool: {}", tool)),
@@ -241,6 +261,11 @@ fn compute_and_cache_stats(tool: &str, state: &AppState) -> Result<(), String> {
             let json = serde_json::to_value(stats).map_err(|e| e.to_string())?;
             (json.clone(), json, Value::Null)
         }
+        "cursor-cli" => {
+            let stats = crate::cursor_cli::commands::stats::get_stats()?;
+            let json = serde_json::to_value(stats).map_err(|e| e.to_string())?;
+            (json.clone(), json, Value::Null)
+        }
         _ => return Err(format!("Unknown tool: {}", tool)),
     };
     let mut cache = state.stats_cache.lock();
@@ -264,6 +289,7 @@ pub fn resume_session(tool: String, session_id: String, work_dir: String, file_p
         "opencode" => crate::opencode::commands::terminal::resume_session(session_id, work_dir),
         "copilot" => crate::copilot::commands::terminal::resume_session(session_id, work_dir),
         "cursor" => crate::cursor::commands::terminal::resume_session(session_id, work_dir),
+        "cursor-cli" => crate::cursor::commands::terminal::resume_session(session_id, work_dir),
         _ => Err(format!("Unknown tool: {}", tool)),
     }
 }

@@ -1,5 +1,5 @@
 // Tool type discriminator
-export type ToolType = "claude" | "codex" | "opencode" | "copilot" | "cursor";
+export type ToolType = "claude" | "codex" | "opencode" | "copilot" | "cursor" | "cursor-cli";
 
 // ============ Projects ============
 
