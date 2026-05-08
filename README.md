@@ -82,8 +82,34 @@
 
 **Linux (Ubuntu/Debian):**
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+sudo apt install -y \
+  build-essential \
+  pkg-config \
+  libssl-dev \
+  libwebkit2gtk-4.1-dev \
+  libjavascriptcoregtk-4.1-dev \
+  libsoup-3.0-dev \
+  libglib2.0-dev \
+  libgtk-3-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev \
+  libgdk-pixbuf-xlib-2.0-dev \
+  libpango1.0-dev \
+  libatk1.0-dev \
+  libcairo2-dev \
+  patchelf
 ```
+
+> 注意：较新版本的 Debian/Ubuntu 中 `libgdk-pixbuf2.0-dev` 已被 `libgdk-pixbuf-xlib-2.0-dev` 替代。
+
+**Linux (WSL2):**
+
+WSL2 需要支持 GUI 的环境才能运行桌面窗口。推荐使用内置 WSLg 的 WSL2（Windows 11 或 Windows 10 较新版本），安装上述依赖后可直接运行。
+
+> 注意：WSL2 不支持运行 AppImage 格式的安装包（缺少 FUSE 支持），请使用 `.deb` 包安装。打包时可通过以下命令跳过 AppImage：
+> ```bash
+> npm run tauri build -- --bundles deb
+> ```
 
 ## Development
 
@@ -92,13 +118,13 @@ git clone https://github.com/Jiaweimsg/session-viewer.git
 cd session-viewer
 
 npm install
-npx tauri dev
+npm run tauri dev
 ```
 
 ## Build
 
 ```bash
-npx tauri build
+npm run tauri build
 ```
 
 构建产物位于 `src-tauri/target/release/bundle/`：
