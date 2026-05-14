@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.15] - 2026-05-14
+
+### Fixed
+
+#### Claude 使用统计页看不到当前月份的数据
+- 现象：客户打开「使用统计」时，月份下拉只能选到过往月份，本月（含本月新写入的 token / message / 工具调用）完全不出现
+- 根因：`get_global_stats()` 直接吐 `~/.claude/stats-cache.json`，这份缓存是 Claude Code CLI 自己维护的，最近没用 CLI、或 CLI 后台聚合还没跑时会停在几天～几周前的 `last_computed_date`；前端 `extractMonths` 从返回数据里反推月份列表，本月数据不在 → 月份选项也不出现
+- 修复（`src-tauri/src/claude/commands/stats.rs`）：把 `stats-cache.json` 当作 baseline，按 `last_computed_date` 当截断日，扫 `~/.claude/projects/*/*.jsonl` 中 mtime 在截断日之后的文件，把日期 `>` cutoff 的记录增量合并进 `daily_activity` / `daily_model_tokens` / `model_usage`；session_count 只在「文件第一条记录」也晚于 cutoff 时计入，避免与 cache 已计入的跨日 session 双计
+- 新增两条单元测试覆盖核心不变式：1) 全新 session 的会话/消息/工具调用全部进入 delta；2) 跨 cutoff 的延续 session 不会被二次计入 session_count，cutoff 前的 token 也不会泄漏
+- Codex / opencode / Cursor 的 stats 每次都是实时全量扫源数据，本身就不存在该问题，未改动
+
 ## [0.5.14] - 2026-05-08
 
 ### Added

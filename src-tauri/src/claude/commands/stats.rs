@@ -13,21 +13,317 @@ use crate::claude::parser::path_encoder::{get_projects_dir, get_stats_cache_path
 pub fn get_global_stats() -> Result<StatsCache, String> {
     let path = get_stats_cache_path().ok_or("Could not find stats cache path")?;
 
+    // Cache file is owned by Claude Code itself and may be days/weeks stale.
+    // If usable, treat it as a baseline and merge in any JSONL records newer
+    // than `last_computed_date` so the current month is always covered.
     if path.exists() {
-        let content = fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read stats cache: {}", e))?;
-
-        let stats: StatsCache = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse stats cache: {}", e))?;
-
-        // If cache has data, use it
-        if !stats.daily_activity.is_empty() {
-            return Ok(stats);
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(cached) = serde_json::from_str::<StatsCache>(&content) {
+                let cutoff = cached
+                    .last_computed_date
+                    .as_ref()
+                    .filter(|d| d.len() >= 10)
+                    .cloned();
+                if !cached.daily_activity.is_empty() {
+                    if let Some(cutoff_date) = cutoff {
+                        return merge_incremental(cached, cutoff_date);
+                    }
+                }
+            }
         }
     }
 
-    // Fallback: compute stats dynamically from session files
+    // Fallback: cache missing/empty/unparseable — compute everything from JSONL.
     compute_stats_from_sessions()
+}
+
+/// Merge fresh JSONL records into a cached `StatsCache`.
+/// Only files with mtime strictly after the cutoff day are opened, and only
+/// records dated strictly after `cutoff_date` are accumulated, so the cache's
+/// historical values stay untouched.
+fn merge_incremental(mut base: StatsCache, cutoff_date: String) -> Result<StatsCache, String> {
+    let projects_dir = get_projects_dir().ok_or("Could not find Claude projects directory")?;
+    if !projects_dir.exists() {
+        return Ok(base);
+    }
+
+    // Skip files whose mtime is on or before end-of-cutoff_date (00:00 UTC of
+    // cutoff_date+1). Anything written that early can't contain records dated
+    // after cutoff_date.
+    let cutoff_mtime = match chrono::NaiveDate::parse_from_str(&cutoff_date, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.succ_opt())
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+    {
+        Some(naive) => {
+            let ts = naive.and_utc().timestamp();
+            if ts < 0 {
+                return Ok(base);
+            }
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(ts as u64)
+        }
+        None => return Ok(base),
+    };
+
+    let mut delta_daily: HashMap<String, (u64, u64, u64)> = HashMap::new();
+    let mut delta_model_tokens: HashMap<String, HashMap<String, u64>> = HashMap::new();
+    let mut delta_model_usage: HashMap<String, ModelUsageEntry> = HashMap::new();
+
+    let entries = fs::read_dir(&projects_dir)
+        .map_err(|e| format!("Failed to read projects dir: {}", e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let files = match fs::read_dir(&path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+
+        for file_entry in files.flatten() {
+            let file_path = file_entry.path();
+            if !file_path
+                .extension()
+                .map(|e| e == "jsonl")
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            let mtime = match file_path.metadata().and_then(|m| m.modified()) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if mtime <= cutoff_mtime {
+                continue;
+            }
+
+            scan_session_incremental(
+                &file_path,
+                &cutoff_date,
+                &mut delta_daily,
+                &mut delta_model_tokens,
+                &mut delta_model_usage,
+            );
+        }
+    }
+
+    // Merge daily_activity (add only — delta only contains dates > cutoff).
+    let mut daily_map: HashMap<String, DailyActivity> = base
+        .daily_activity
+        .into_iter()
+        .map(|d| (d.date.clone(), d))
+        .collect();
+    for (date, (msgs, sessions, tools)) in delta_daily {
+        let entry = daily_map.entry(date.clone()).or_insert(DailyActivity {
+            date,
+            message_count: 0,
+            session_count: 0,
+            tool_call_count: 0,
+        });
+        entry.message_count += msgs;
+        entry.session_count += sessions;
+        entry.tool_call_count += tools;
+    }
+    let mut daily_activity: Vec<DailyActivity> = daily_map.into_values().collect();
+    daily_activity.sort_by(|a, b| a.date.cmp(&b.date));
+    base.daily_activity = daily_activity;
+
+    // Merge daily_model_tokens.
+    let mut dmt_map: HashMap<String, HashMap<String, u64>> = base
+        .daily_model_tokens
+        .into_iter()
+        .map(|d| (d.date, d.tokens_by_model))
+        .collect();
+    for (date, tokens) in delta_model_tokens {
+        let entry = dmt_map.entry(date).or_default();
+        for (model, t) in tokens {
+            *entry.entry(model).or_insert(0) += t;
+        }
+    }
+    let mut dmt: Vec<DailyModelTokens> = dmt_map
+        .into_iter()
+        .map(|(date, tokens_by_model)| DailyModelTokens {
+            date,
+            tokens_by_model,
+        })
+        .collect();
+    dmt.sort_by(|a, b| a.date.cmp(&b.date));
+    base.daily_model_tokens = dmt;
+
+    // Merge model_usage all-time totals.
+    for (model, delta) in delta_model_usage {
+        let entry = base
+            .model_usage
+            .entry(model)
+            .or_insert_with(|| ModelUsageEntry {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+            });
+        entry.input_tokens += delta.input_tokens;
+        entry.output_tokens += delta.output_tokens;
+        entry.cache_read_input_tokens += delta.cache_read_input_tokens;
+        entry.cache_creation_input_tokens += delta.cache_creation_input_tokens;
+    }
+
+    base.last_computed_date = Some(chrono::Utc::now().format("%Y-%m-%d").to_string());
+    Ok(base)
+}
+
+/// Like `scan_session_for_stats`, but only emits records strictly after
+/// `cutoff_date`. Session_count is credited only when the session's first
+/// record is also after the cutoff (avoids double-counting carryover sessions
+/// already present in the cache).
+fn scan_session_incremental(
+    path: &Path,
+    cutoff_date: &str,
+    daily_stats: &mut HashMap<String, (u64, u64, u64)>,
+    daily_model_tokens: &mut HashMap<String, HashMap<String, u64>>,
+    model_usage: &mut HashMap<String, ModelUsageEntry>,
+) {
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    let reader = BufReader::new(file);
+
+    let mut first_record_date: Option<String> = None;
+    let mut day_messages: HashMap<String, u64> = HashMap::new();
+    let mut day_tools: HashMap<String, u64> = HashMap::new();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.contains("\"type\":\"file-history-snapshot\"")
+            || trimmed.contains("\"type\":\"progress\"")
+        {
+            continue;
+        }
+
+        let v: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let record_type = match v.get("type").and_then(|t| t.as_str()) {
+            Some(t) => t,
+            None => continue,
+        };
+
+        if record_type != "user" && record_type != "assistant" {
+            continue;
+        }
+
+        let date = v
+            .get("timestamp")
+            .and_then(|t| t.as_str())
+            .and_then(|ts| {
+                if ts.len() >= 10 {
+                    Some(ts[..10].to_string())
+                } else {
+                    None
+                }
+            });
+
+        let date = match date {
+            Some(d) => d,
+            None => continue,
+        };
+
+        if first_record_date.is_none() {
+            first_record_date = Some(date.clone());
+        }
+
+        if date.as_str() <= cutoff_date {
+            continue;
+        }
+
+        *day_messages.entry(date.clone()).or_insert(0) += 1;
+
+        if record_type == "assistant" {
+            if let Some(msg) = v.get("message") {
+                if let Some(content) = msg.get("content").and_then(|c| c.as_array()) {
+                    for block in content {
+                        if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                            *day_tools.entry(date.clone()).or_insert(0) += 1;
+                        }
+                    }
+                }
+
+                let model = msg
+                    .get("model")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown");
+
+                if model == "<synthetic>" || model == "unknown" {
+                    continue;
+                }
+
+                if let Some(usage) = msg.get("usage") {
+                    let input = usage
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let output = usage
+                        .get("output_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let cache_read = usage
+                        .get("cache_read_input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let cache_creation = usage
+                        .get("cache_creation_input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+
+                    let total_tokens = input + output + cache_read + cache_creation;
+
+                    let day_tokens = daily_model_tokens.entry(date.clone()).or_default();
+                    *day_tokens.entry(model.to_string()).or_insert(0) += total_tokens;
+
+                    let entry =
+                        model_usage
+                            .entry(model.to_string())
+                            .or_insert_with(|| ModelUsageEntry {
+                                input_tokens: 0,
+                                output_tokens: 0,
+                                cache_read_input_tokens: 0,
+                                cache_creation_input_tokens: 0,
+                            });
+                    entry.input_tokens += input;
+                    entry.output_tokens += output;
+                    entry.cache_read_input_tokens += cache_read;
+                    entry.cache_creation_input_tokens += cache_creation;
+                }
+            }
+        }
+    }
+
+    for (date, msg_count) in &day_messages {
+        let entry = daily_stats.entry(date.clone()).or_insert((0, 0, 0));
+        entry.0 += msg_count;
+        entry.2 += day_tools.get(date).copied().unwrap_or(0);
+    }
+
+    if let Some(d) = first_record_date {
+        if d.as_str() > cutoff_date {
+            let entry = daily_stats.entry(d).or_insert((0, 0, 0));
+            entry.1 += 1;
+        }
+    }
 }
 
 pub fn get_token_summary() -> Result<TokenUsageSummary, String> {
@@ -589,4 +885,100 @@ fn scan_session_advanced(path: &Path) -> SessionScanResult {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_jsonl(path: &Path, lines: &[&str]) {
+        let mut f = fs::File::create(path).unwrap();
+        for l in lines {
+            writeln!(f, "{}", l).unwrap();
+        }
+    }
+
+    fn assistant_line(ts: &str, model: &str, input: u64, output: u64) -> String {
+        format!(
+            r#"{{"type":"assistant","timestamp":"{}","message":{{"model":"{}","content":[{{"type":"tool_use","name":"Read"}}],"usage":{{"input_tokens":{},"output_tokens":{}}}}}}}"#,
+            ts, model, input, output
+        )
+    }
+
+    fn user_line(ts: &str) -> String {
+        format!(r#"{{"type":"user","timestamp":"{}","message":{{"role":"user","content":"hi"}}}}"#, ts)
+    }
+
+    #[test]
+    fn scan_incremental_only_emits_post_cutoff_records() {
+        // Brand-new session entirely after cutoff: must credit a session and
+        // accumulate messages/tokens.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.jsonl");
+        write_jsonl(
+            &file,
+            &[
+                &user_line("2026-05-13T09:00:00Z"),
+                &assistant_line("2026-05-13T09:00:01Z", "claude-sonnet-4-6", 200, 80),
+                &assistant_line("2026-05-14T10:00:00Z", "claude-opus-4-7", 300, 120),
+            ],
+        );
+
+        let mut daily: HashMap<String, (u64, u64, u64)> = HashMap::new();
+        let mut dmt: HashMap<String, HashMap<String, u64>> = HashMap::new();
+        let mut usage: HashMap<String, ModelUsageEntry> = HashMap::new();
+        scan_session_incremental(&file, "2026-05-12", &mut daily, &mut dmt, &mut usage);
+
+        let d13 = daily.get("2026-05-13").expect("missing 2026-05-13");
+        assert_eq!(d13.0, 2, "2026-05-13 message_count");
+        assert_eq!(d13.2, 1, "2026-05-13 tool_call_count");
+        assert_eq!(d13.1, 1, "fresh session credited on first record day");
+
+        let d14 = daily.get("2026-05-14").expect("missing 2026-05-14");
+        assert_eq!(d14.0, 1, "2026-05-14 message_count");
+        assert_eq!(d14.2, 1, "2026-05-14 tool_call_count");
+        assert_eq!(d14.1, 0, "second day should not get a session");
+
+        let sonnet = usage.get("claude-sonnet-4-6").expect("sonnet usage");
+        assert_eq!(sonnet.input_tokens, 200);
+        assert_eq!(sonnet.output_tokens, 80);
+        let opus = usage.get("claude-opus-4-7").expect("opus usage");
+        assert_eq!(opus.input_tokens, 300);
+        assert_eq!(opus.output_tokens, 120);
+    }
+
+    #[test]
+    fn scan_incremental_skips_carryover_session_and_ignores_pre_cutoff_records() {
+        // Session started before cutoff and continues after — pre-cutoff records
+        // must be ignored entirely (already in cache), and session_count must
+        // NOT be credited again (would double-count).
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.jsonl");
+        write_jsonl(
+            &file,
+            &[
+                &user_line("2026-04-30T08:00:00Z"),
+                &assistant_line("2026-04-30T08:00:01Z", "claude-sonnet-4-6", 50, 20),
+                &user_line("2026-05-13T09:00:00Z"),
+                &assistant_line("2026-05-13T09:00:01Z", "claude-sonnet-4-6", 100, 40),
+            ],
+        );
+
+        let mut daily: HashMap<String, (u64, u64, u64)> = HashMap::new();
+        let mut dmt: HashMap<String, HashMap<String, u64>> = HashMap::new();
+        let mut usage: HashMap<String, ModelUsageEntry> = HashMap::new();
+        scan_session_incremental(&file, "2026-05-12", &mut daily, &mut dmt, &mut usage);
+
+        assert!(!daily.contains_key("2026-04-30"), "pre-cutoff date leaked");
+        assert!(!dmt.contains_key("2026-04-30"), "pre-cutoff tokens leaked");
+
+        let d13 = daily.get("2026-05-13").expect("missing 2026-05-13");
+        assert_eq!(d13.0, 2, "messages on 2026-05-13");
+        assert_eq!(d13.1, 0, "carryover session must not be re-counted");
+
+        let sonnet = usage.get("claude-sonnet-4-6").expect("sonnet usage");
+        assert_eq!(sonnet.input_tokens, 100, "only post-cutoff tokens");
+        assert_eq!(sonnet.output_tokens, 40);
+    }
 }
