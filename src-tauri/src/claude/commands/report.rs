@@ -3,7 +3,9 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::claude::parser::path_encoder::{get_projects_dir, short_name_from_path};
+use crate::claude::parser::path_encoder::{
+    get_projects_dir, list_session_jsonl_files, short_name_from_path,
+};
 use crate::report::UsageRecord;
 
 /// Scan all Claude sessions and aggregate usage by (date, project, model)
@@ -29,28 +31,20 @@ pub fn collect_usage_records() -> Result<Vec<UsageRecord>, String> {
 
         let project_name = resolve_project_name(&path);
 
-        let files = match fs::read_dir(&path) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
+        for file_path in list_session_jsonl_files(&path) {
+            let session_id = file_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string();
 
-        for file_entry in files.flatten() {
-            let file_path = file_entry.path();
-            if file_path.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                let session_id = file_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-
-                scan_session_for_report(
-                    &file_path,
-                    &project_name,
-                    &session_id,
-                    &mut agg,
-                    &mut session_tracker,
-                );
-            }
+            scan_session_for_report(
+                &file_path,
+                &project_name,
+                &session_id,
+                &mut agg,
+                &mut session_tracker,
+            );
         }
     }
 
@@ -163,26 +157,21 @@ fn scan_session_for_report(
 }
 
 fn resolve_project_name(project_dir: &Path) -> String {
-    if let Ok(dir_entries) = fs::read_dir(project_dir) {
-        for entry in dir_entries.flatten() {
-            let file_path = entry.path();
-            if file_path.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                let file = match fs::File::open(&file_path) {
-                    Ok(f) => f,
-                    Err(_) => continue,
-                };
-                let reader = BufReader::new(file);
-                for line in reader.lines().take(10) {
-                    let line = match line {
-                        Ok(l) => l,
-                        Err(_) => continue,
-                    };
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-                        if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
-                            if !cwd.is_empty() {
-                                return short_name_from_path(cwd);
-                            }
-                        }
+    for file_path in list_session_jsonl_files(project_dir) {
+        let file = match fs::File::open(&file_path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let reader = BufReader::new(file);
+        for line in reader.lines().take(10) {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
+                    if !cwd.is_empty() {
+                        return short_name_from_path(cwd);
                     }
                 }
             }

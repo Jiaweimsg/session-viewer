@@ -24,6 +24,7 @@ import {
   FolderOpen,
   Wrench,
   TrendingUp,
+  AlertTriangle,
 } from "lucide-react";
 
 export function StatsPage() {
@@ -664,12 +665,45 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
   const projectRanking = stats.projectRanking || [];
   const efficiency = stats.efficiency;
 
+  // Cursor's official cost/cache/billable numbers only come from the
+  // cursor.com CSV export, which needs an active Cursor login. When that
+  // fetch fails we deliberately surface no token figures (rather than the
+  // misleading bubble-only subset) and prompt the user to fix the cause.
+  const authStatus = stats.authStatus ?? "ok";
+  const tokensReady = authStatus === "ok";
+  const dataSourceIsApi = stats.dataSource === "api";
+  const authMessage =
+    authStatus === "expired"
+      ? "Cursor 登录已过期。请打开 Cursor 应用重新登录后回到这里刷新。"
+      : authStatus === "missing"
+      ? "未检测到本地 Cursor 登录凭证。请在 Cursor 应用中登录后回到这里刷新。"
+      : authStatus === "network"
+      ? "无法连接 Cursor 官方接口(网络问题或代理拦截)。Token / Cost 数据暂不可用。"
+      : authStatus === "unknown"
+      ? "拉取 Cursor 用量数据失败,Token / Cost 暂不可用。"
+      : "";
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">使用统计</h1>
         <MonthFilter months={months} selected={selectedMonth} onChange={setSelectedMonth} />
       </div>
+
+      {/* Auth banner: shown when API path failed. Token/Cost widgets fall back
+          to "—" below so we never display misleading bubble-only totals. */}
+      {!tokensReady && (
+        <div className="mb-6 flex items-start gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          <AlertTriangle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium mb-0.5">Cursor 用量数据不可用</div>
+            <div className="text-xs leading-relaxed">{authMessage}</div>
+            <div className="text-xs leading-relaxed mt-1 opacity-80">
+              会话数 / 消息数 / 项目分布等本地维度仍正常展示。
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-7 gap-4 mb-8">
@@ -702,12 +736,12 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
         <StatCard
           icon={<Activity className="w-5 h-5" />}
           label="输入 Token"
-          value={formatTokens(filteredInput)}
+          value={tokensReady ? formatTokens(filteredInput) : "—"}
         />
         <StatCard
           icon={<Activity className="w-5 h-5" />}
           label="输出 Token"
-          value={formatTokens(filteredOutput)}
+          value={tokensReady ? formatTokens(filteredOutput) : "—"}
         />
         <StatCard
           icon={<FolderOpen className="w-5 h-5" />}
@@ -745,13 +779,15 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
         </div>
       )}
 
-      {/* Daily token usage chart */}
-      {tokenData.length > 0 && (
+      {/* Daily token usage chart — only rendered when API delivered data.
+          Without API the bubble-derived numbers miss ~80% of real usage. */}
+      {tokensReady && tokenData.length > 0 && (
         <div className="bg-card border border-border rounded-lg p-4 mb-6">
           <h2 className="text-sm font-medium mb-1">每日 Token 用量</h2>
           <p className="text-xs text-muted-foreground mb-4">
-            仅覆盖 Cursor 旧版 Chat Composer 消息的 token；Agent 模式与 Tab
-            completion 的 token 不在本地记录，准确值请查 Cursor 官方 Dashboard。
+            {dataSourceIsApi
+              ? "数据来源:Cursor 官方用量接口(含 cache_read / cache_write,与 cursor.com Dashboard 一致)。"
+              : "仅覆盖 Cursor 旧版 Chat Composer 消息的 token;Agent 模式与 Tab completion 的 token 不在本地记录,准确值请查 Cursor 官方 Dashboard。"}
           </p>
           <ResponsiveContainer width="100%" height={250}>
             <BarChart data={tokenData}>
@@ -848,10 +884,15 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
       {/* Project token ranking */}
       {projectRanking.length > 0 && (
         <div className="bg-card border border-border rounded-lg p-4 mb-6">
-          <h2 className="text-sm font-medium mb-4 flex items-center gap-2">
+          <h2 className="text-sm font-medium mb-1 flex items-center gap-2">
             <FolderOpen className="w-4 h-4" />
             项目 Token 消耗排行
           </h2>
+          <p className="text-xs text-muted-foreground mb-4">
+            {dataSourceIsApi
+              ? "项目维度 token 来自本地 SQLite(不含 cache_read/write),仅用于横向对比;总览数据以上面的官方接口为准。"
+              : "项目维度仅展示会话/消息分布;token 数值需要 Cursor 登录后生效。"}
+          </p>
           <div className="space-y-3">
             {projectRanking.map((p, i) => {
               const maxTokens = projectRanking[0]?.totalTokens || 1;

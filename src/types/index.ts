@@ -329,7 +329,15 @@ export interface CursorStats {
   totalRequests: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCacheReadTokens?: number;
+  totalCacheWriteTokens?: number;
   totalTokens: number;
+  estimatedCost?: number;
+  /** "api" — figures from cursor.com export; "local" — bubble fallback (incomplete) */
+  dataSource?: "api" | "local";
+  /** "ok" | "expired" | "missing" | "network" | "unknown" */
+  authStatus?: string;
+  authError?: string | null;
   dailyActivity: CursorDailyActivity[];
   dailyTokens: CursorDailyTokenEntry[];
   modeDistribution: CursorModeEntry[];

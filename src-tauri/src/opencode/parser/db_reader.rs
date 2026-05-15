@@ -107,7 +107,7 @@ pub fn count_sessions_for_project(conn: &Connection, project_id: &str) -> usize 
 
 pub fn query_sessions(conn: &Connection, project_id: &str) -> Vec<SessionRow> {
     let mut stmt = match conn.prepare(
-        "SELECT id, project_id, parent_id, title, COALESCE(path, ''), \
+        "SELECT id, project_id, parent_id, title, COALESCE(directory, ''), \
          time_created, time_updated \
          FROM session WHERE project_id = ?1 ORDER BY time_updated DESC",
     ) {
@@ -269,6 +269,45 @@ pub fn query_all_assistant_messages(conn: &Connection) -> Vec<MessageRow> {
                 serde_json::from_str::<Value>(&data_str)
                     .ok()
                     .map(|data| MessageRow { id, session_id: sid, time_created: tc, data })
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Assistant messages joined with their project's worktree path. Used by the
+/// report path so we can attribute tokens to the right project basename
+/// (sessions live in `session.project_id` → `project.worktree`).
+pub fn query_all_assistant_messages_with_worktree(
+    conn: &Connection,
+) -> Vec<(MessageRow, String)> {
+    let mut stmt = match conn.prepare(
+        "SELECT m.id, m.session_id, m.time_created, m.data, COALESCE(p.worktree, '') \
+         FROM message m \
+         JOIN session s ON m.session_id = s.id \
+         LEFT JOIN project p ON s.project_id = p.id \
+         WHERE json_extract(m.data, '$.role') = 'assistant' \
+         ORDER BY m.time_created ASC",
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    })
+    .map(|rows| {
+        rows.filter_map(|r| r.ok())
+            .filter_map(|(id, sid, tc, data_str, worktree)| {
+                serde_json::from_str::<Value>(&data_str)
+                    .ok()
+                    .map(|data| (MessageRow { id, session_id: sid, time_created: tc, data }, worktree))
             })
             .collect()
     })

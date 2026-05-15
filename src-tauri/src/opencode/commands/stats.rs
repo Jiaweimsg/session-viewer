@@ -10,6 +10,7 @@ pub fn get_stats() -> Result<TokenSummary, String> {
             return Ok(TokenSummary {
                 total_input_tokens: 0,
                 total_output_tokens: 0,
+                total_reasoning_tokens: 0,
                 total_tokens: 0,
                 tokens_by_model: HashMap::new(),
                 daily_tokens: vec![],
@@ -33,8 +34,9 @@ pub fn get_stats() -> Result<TokenSummary, String> {
 
     let mut total_input = 0u64;
     let mut total_output = 0u64;
+    let mut total_reasoning = 0u64;
     let mut tokens_by_model: HashMap<String, u64> = HashMap::new();
-    let mut daily_map: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut daily_map: HashMap<String, (u64, u64, u64)> = HashMap::new();
 
     for msg in &assistant_messages {
         let tokens = match msg.data.get("tokens") {
@@ -44,6 +46,10 @@ pub fn get_stats() -> Result<TokenSummary, String> {
 
         let input = tokens.get("input").and_then(|v| v.as_u64()).unwrap_or(0);
         let output = tokens.get("output").and_then(|v| v.as_u64()).unwrap_or(0);
+        let reasoning = tokens
+            .get("reasoning")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let cache_write = tokens
             .get("cache")
             .and_then(|c| c.get("write"))
@@ -58,6 +64,7 @@ pub fn get_stats() -> Result<TokenSummary, String> {
         let effective_input = input + cache_write + cache_read;
         total_input += effective_input;
         total_output += output;
+        total_reasoning += reasoning;
 
         let provider = msg.data.get("providerID").and_then(|v| v.as_str()).unwrap_or("unknown");
         let model = msg.data.get("modelID").and_then(|v| v.as_str()).unwrap_or("unknown");
@@ -68,18 +75,20 @@ pub fn get_stats() -> Result<TokenSummary, String> {
             .map(|dt| dt.format("%Y-%m-%d").to_string())
             .unwrap_or_default();
         if !date.is_empty() {
-            let entry = daily_map.entry(date).or_insert((0, 0));
+            let entry = daily_map.entry(date).or_insert((0, 0, 0));
             entry.0 += effective_input;
             entry.1 += output;
+            entry.2 += reasoning;
         }
     }
 
     let mut daily_tokens: Vec<DailyTokenEntry> = daily_map
         .into_iter()
-        .map(|(date, (input, output))| DailyTokenEntry {
+        .map(|(date, (input, output, reasoning))| DailyTokenEntry {
             date,
             input_tokens: input,
             output_tokens: output,
+            reasoning_tokens: reasoning,
             total_tokens: input + output,
         })
         .collect();
@@ -88,6 +97,7 @@ pub fn get_stats() -> Result<TokenSummary, String> {
     Ok(TokenSummary {
         total_input_tokens: total_input,
         total_output_tokens: total_output,
+        total_reasoning_tokens: total_reasoning,
         total_tokens: total_input + total_output,
         tokens_by_model,
         daily_tokens,

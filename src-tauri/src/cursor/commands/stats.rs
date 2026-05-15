@@ -13,7 +13,20 @@ pub struct CursorStats {
     pub total_requests: usize,
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
+    pub total_cache_read_tokens: u64,
+    pub total_cache_write_tokens: u64,
     pub total_tokens: u64,
+    pub estimated_cost: f64,
+    /// "api" when authoritative cursor.com data is used, "local" when the
+    /// SQLite-bubble fallback drives the figures. Surfaces accuracy to the UI.
+    pub data_source: String,
+    /// "ok" | "expired" | "missing" | "network" | "unknown".
+    /// When non-"ok" the token/cost fields are forced to zero so the UI can
+    /// render a clear "请登录 Cursor" banner instead of showing wrong numbers.
+    pub auth_status: String,
+    /// Human-readable reason behind `auth_status` for diagnostics (only
+    /// surfaced to the dev console / logs, never to end users).
+    pub auth_error: Option<String>,
     pub daily_activity: Vec<CursorDailyActivity>,
     pub daily_tokens: Vec<CursorDailyTokenEntry>,
     pub mode_distribution: Vec<ModeEntry>,
@@ -38,7 +51,10 @@ pub struct CursorDailyTokenEntry {
     pub date: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
     pub total_tokens: u64,
+    pub cost: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,7 +127,13 @@ pub fn get_stats() -> Result<CursorStats, String> {
             total_requests: 0,
             total_input_tokens: 0,
             total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_write_tokens: 0,
             total_tokens: 0,
+            estimated_cost: 0.0,
+            data_source: "local".to_string(),
+            auth_status: "missing".to_string(),
+            auth_error: Some("no cursor sessions found".to_string()),
             daily_activity: Vec::new(),
             daily_tokens: Vec::new(),
             mode_distribution: Vec::new(),
@@ -128,6 +150,24 @@ pub fn get_stats() -> Result<CursorStats, String> {
             archived_sessions: 0,
         });
     }
+
+    // Cursor's local SQLite bubbles only carry input/output tokens — cache
+    // tokens (~80%+ of real usage on long Agent sessions) and cost only live
+    // in the official cursor.com API. So we attach the API result here and
+    // distinguish three outcomes:
+    //   - success    → tokens & cost are authoritative.
+    //   - failure    → we surface auth_status so the UI can ask the user to
+    //                  log into Cursor instead of showing the misleading
+    //                  bubble-only totals.
+    let api_result = crate::cursor::api::usage_csv::fetch_usage_rows();
+    let (api_rows, auth_status, auth_error): (Option<_>, String, Option<String>) = match api_result {
+        Ok(rows) => (Some(rows), "ok".to_string(), None),
+        Err(e) => {
+            let status = crate::cursor::api::usage_csv::classify_error(&e);
+            (None, status.to_string(), Some(e))
+        }
+    };
+    let data_source = if api_rows.is_some() { "api" } else { "local" };
 
     let unique_projects: HashSet<_> = headers
         .iter()
@@ -150,9 +190,13 @@ pub fn get_stats() -> Result<CursorStats, String> {
     let archived_sessions = headers.iter().filter(|h| h.is_archived).count();
     let active_sessions = headers.len() - archived_sessions;
 
-    // Per-session scanning: tokens, daily activity, project stats
-    let mut total_input_tokens: u64 = 0;
-    let mut total_output_tokens: u64 = 0;
+    // Per-session scanning: daily activity, project stats, model counts.
+    // `total_input_tokens` / `total_output_tokens` are filled later by the
+    // API success branch (or zeroed by the failure branch) — bubbles never
+    // contribute to global token totals because they miss cache_read/write
+    // which dominates real Cursor usage.
+    let total_input_tokens: u64;
+    let total_output_tokens: u64;
     let mut total_messages: usize = 0;
     let mut total_requests: usize = 0;
 
@@ -162,8 +206,8 @@ pub fn get_stats() -> Result<CursorStats, String> {
     // daily_date -> (messages, sessions_set)
     let mut daily_messages: HashMap<String, u64> = HashMap::new();
     let mut daily_sessions: HashMap<String, HashSet<String>> = HashMap::new();
-    // daily_date -> (input, output)
-    let mut daily_token_map: HashMap<String, (u64, u64)> = HashMap::new();
+    // daily_date -> (input, output, cache_read, cache_write, cost)
+    let mut daily_token_map: HashMap<String, (u64, u64, u64, u64, f64)> = HashMap::new();
     // project -> (input, output, session_count, message_count)
     let mut project_stats: HashMap<String, (u64, u64, usize, usize)> = HashMap::new();
     // per-session message counts for efficiency
@@ -217,7 +261,7 @@ pub fn get_stats() -> Result<CursorStats, String> {
                     .or_else(|| session_date.clone());
 
                 if let Some(date) = bubble_date {
-                    let entry = daily_token_map.entry(date).or_insert((0, 0));
+                    let entry = daily_token_map.entry(date).or_insert((0, 0, 0, 0, 0.0));
                     entry.0 += tc.input_tokens;
                     entry.1 += tc.output_tokens;
                 }
@@ -246,8 +290,11 @@ pub fn get_stats() -> Result<CursorStats, String> {
             }
         }
 
-        total_input_tokens += session_input;
-        total_output_tokens += session_output;
+        // ── Bubble token accumulation lives only in `project_stats` and
+        // `session_token_totals` (used for project ranking / efficiency).
+        // The global `total_input_tokens` / `total_output_tokens` are NOT
+        // accumulated from bubbles — both downstream branches (API success
+        // or API failure) overwrite them deterministically.
 
         // Project stats — tokens always, but session/message counts skip when
         // transcript side will handle them.
@@ -293,6 +340,68 @@ pub fn get_stats() -> Result<CursorStats, String> {
     }
     let transcript_session_count = transcript_files.len();
 
+    // ── Token aggregates: choose between API (authoritative) and local-zero ──
+    //
+    // When the API is reachable we replace the bubble-derived totals — bubbles
+    // miss cache_read/write entirely, which on Agent sessions is 80%+ of real
+    // usage. When the API is NOT reachable we deliberately zero out the token
+    // figures rather than fall back to the misleading bubble path; the UI
+    // surfaces a "需要登录 Cursor" banner via `auth_status`. (Project ranking,
+    // efficiency, daily activity, mode distribution still come from local
+    // SQLite — those dimensions are accurate even without the API.)
+    //
+    // Aggregation rules (matches Cursor's official panel + TokenTracker):
+    //   - Total/daily tokens: ALL rows count (billable + non-billable).
+    //   - Cost: only billable rows contribute (free / no-charge rows have $0).
+    //   - model_usage request_count: one per CSV row (event count).
+    let mut total_cache_read: u64 = 0;
+    let mut total_cache_write: u64 = 0;
+    let mut estimated_cost: f64 = 0.0;
+    if let Some(rows) = api_rows {
+        let mut input_acc: u64 = 0;
+        let mut output_acc: u64 = 0;
+        daily_token_map.clear();
+        model_counts.clear();
+        for r in &rows {
+            input_acc += r.input_tokens;
+            output_acc += r.output_tokens;
+            total_cache_read += r.cache_read_tokens;
+            total_cache_write += r.cache_write_tokens;
+            let e = daily_token_map.entry(r.date.clone()).or_insert((0, 0, 0, 0, 0.0));
+            e.0 += r.input_tokens;
+            e.1 += r.output_tokens;
+            e.2 += r.cache_read_tokens;
+            e.3 += r.cache_write_tokens;
+            if r.billable {
+                estimated_cost += r.cost;
+                e.4 += r.cost;
+            }
+            if !r.model.is_empty() {
+                *model_counts.entry(r.model.clone()).or_insert(0) += 1;
+            }
+        }
+        total_input_tokens = input_acc;
+        total_output_tokens = output_acc;
+    } else {
+        // API unreachable: bubble tokens are systematically wrong (missing
+        // cache), so we show nothing instead of misleading numbers. UI reads
+        // `auth_status` and surfaces a "请登录 Cursor" banner.
+        total_input_tokens = 0;
+        total_output_tokens = 0;
+        daily_token_map.clear();
+        model_counts.clear();
+        // Project ranking and efficiency carry bubble tokens too — zero them
+        // for the same reason. Session/message counts stay intact so the user
+        // still sees activity volume per project.
+        for entry in project_stats.values_mut() {
+            entry.0 = 0;
+            entry.1 = 0;
+        }
+        for v in session_token_totals.iter_mut() {
+            *v = 0;
+        }
+    }
+
     // Build daily activity (sorted)
     let mut all_dates: HashSet<String> = HashSet::new();
     all_dates.extend(daily_messages.keys().cloned());
@@ -311,11 +420,14 @@ pub fn get_stats() -> Result<CursorStats, String> {
     // Build daily tokens (sorted)
     let mut daily_tokens: Vec<CursorDailyTokenEntry> = daily_token_map
         .into_iter()
-        .map(|(date, (input, output))| CursorDailyTokenEntry {
+        .map(|(date, (input, output, cread, cwrite, cost))| CursorDailyTokenEntry {
             date,
             input_tokens: input,
             output_tokens: output,
-            total_tokens: input + output,
+            cache_read_tokens: cread,
+            cache_write_tokens: cwrite,
+            total_tokens: input + output + cread + cwrite,
+            cost,
         })
         .collect();
     daily_tokens.sort_by(|a, b| a.date.cmp(&b.date));
@@ -385,7 +497,13 @@ pub fn get_stats() -> Result<CursorStats, String> {
         total_requests,
         total_input_tokens,
         total_output_tokens,
-        total_tokens: total_input_tokens + total_output_tokens,
+        total_cache_read_tokens: total_cache_read,
+        total_cache_write_tokens: total_cache_write,
+        total_tokens: total_input_tokens + total_output_tokens + total_cache_read + total_cache_write,
+        estimated_cost,
+        data_source: data_source.to_string(),
+        auth_status,
+        auth_error,
         daily_activity,
         daily_tokens,
         mode_distribution,

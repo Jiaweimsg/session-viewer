@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Get the Claude home directory (~/.claude)
 pub fn get_claude_home() -> Option<PathBuf> {
@@ -13,6 +13,34 @@ pub fn get_projects_dir() -> Option<PathBuf> {
 /// Get the stats cache file path (~/.claude/stats-cache.json)
 pub fn get_stats_cache_path() -> Option<PathBuf> {
     get_claude_home().map(|h| h.join("stats-cache.json"))
+}
+
+/// Collect every `.jsonl` session file under one project dir, including the
+/// `subagents/agent-*.jsonl` files Claude writes for Agent/Task tool calls.
+///
+/// Without recursion, subagent runs (which often hold the *largest*
+/// `cache_creation_input_tokens` chunks per session — the spawned context is
+/// rehydrated as a fresh 5m cache) get silently dropped, under-reporting any
+/// user that relies on subagents.
+pub fn list_session_jsonl_files(project_dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    walk_jsonl(project_dir, &mut out);
+    out
+}
+
+fn walk_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_jsonl(&path, out);
+        } else if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+            out.push(path);
+        }
+    }
 }
 
 /// Decode an encoded project directory name back to a path

@@ -4,6 +4,60 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.23] - 2026-05-15
+
+### Added
+
+#### Cursor 使用统计接入官方用量接口（cursor.com CSV）
+- 现象：Cursor 「使用统计」页此前只读本地 SQLite bubble，缺失 `cache_read` / `cache_write`（在长 Agent 会话里这两项常占 80%+），也没有 cost；展示出来的 token 总量是 cursor.com Dashboard 的一个**小子集**，数字常年偏低，用户看到的成本永远不准
+- 新增 `cursor::api::auth` + `cursor::api::usage_csv`：从本机 `state.vscdb` 读 `cursorAuth/accessToken` JWT、`~/.cursor/cli-config.json` 取 userId，拼出 WorkOS session cookie，调用 `https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens`，CSV 解析回到结构化数据
+- `cursor::commands::stats::get_stats` 接入：成功时 token / cache / cost 来自官方接口（`dataSource: "api"`），失败时把 `auth_status` 暴露给前端（`expired` / `missing` / `network` / `unknown`），同时把所有 token 字段强制清零，避免用户看见误导性的 bubble-only 总数
+- 前端 `CursorStatsView`：未登录 / 接口失败时显示红色横幅"请登录 Cursor"提示并把 Token 卡片显示 `—`；登录成功时把 daily token chart 与 cost 一起渲染；项目维度沿用本地 SQLite（仅用于横向对比，文案做了显式区分）
+- `reqwest` 启用 `blocking` feature；新增 `base64` 依赖用于解析 JWT payload 取 userId
+
+#### Cursor 高水位历史脏数据一次性迁移
+- 0.5.x 之前 cursor 上报把 bubble-only token（只含 input/output、缺 cache）写到了"工作区项目名"下；新代码改为把准确的官方总量挂在特殊项目 `(cursor)` 下，本地工作区行 token 清零
+- 但 `report.rs` 的高水位"取 max"语义会把这些历史错误数永远钉住，导致服务端 dashboard 双计
+- 新增 `migrate_cursor_hw_2026_05`：首次启动时遍历高水位文件，删除所有非 `(cursor)` 项目的 cursor 行，写一个 flag 文件保证只跑一次；后续上报让服务端 upsert 自然覆盖
+
+### Fixed
+
+#### Claude subagent token 漏算（recursive scan）
+- Claude Code 把 Agent / Task 工具调用的 subagent 上下文写在 `projects/<encoded>/subagents/agent-*.jsonl` 子目录里，而旧逻辑只 `read_dir` 项目根，没递归子目录
+- 后果：subagent 运行里最大的 `cache_creation_input_tokens` 块（每次重新加载上下文都触发 5m cache write）被完全跳过，重度使用 Task tool 的用户在统计页看到的 token 比真实少一截
+- 新增 `path_encoder::list_session_jsonl_files` 递归收集所有 `.jsonl`，`claude::commands::stats` + `report` 全切到新 helper
+
+#### Codex model 字段错位导致服务端定价错算
+- Codex JSONL 的 `session_meta` 只有 `model_provider`，真实 model id（`gpt-5.5` / `o4-mini` 等）写在后续 `turn_context` 行里
+- 旧代码 `report.rs::collect_codex_records` 把 `model_provider` 当成 model 上报，服务端的 pricing 表匹配不到就走默认 fallback × 0.2，价格全错
+- `extract_session_meta` 改为扫前 20 行，session_meta + turn_context 两条记录都解析；优先用 `turn_context.model`，回退到 `model_provider`
+
+#### Codex 历史 AGENTS.md 系统提示混在用户消息里
+- Codex CLI 在每个 session 的第一条 user-role 消息位置注入 `# AGENTS.md instructions for <path>` 作为"伪用户消息"喂给模型；这条不是用户输入，但旧 parser 当成真用户消息渲染了
+- `jsonl::parse_all_messages` 检测到首条 user 消息以这个固定前缀开头时直接跳过
+
+#### OpenCode 上报维度错配
+- 旧 `collect_opencode_records` 在 session 粒度聚合，model 硬编码 "opencode"、token 全 0、跨日 session 全部记到 `time_updated` 当日
+- 改为 message 粒度聚合：从 `message.data.tokens.{input,output,cache.read,cache.write}` 读取真实 token，model 用 `providerID/modelID` 拼接，每条 assistant message 落到自己的 `time_created` 当日，session_count 用 HashSet 去重
+
+#### OpenCode 中文 first_prompt 切片 panic
+- `get_first_prompt` 用 `&text[..100]` 截断超长 prompt，100 字节边界正好落在中文 UTF-8 字节中段时 panic（Windows release build 直接窗口关闭）
+- 修正为 `is_char_boundary` 回退到最近的字符边界后再切
+
+#### OpenCode 会话列表 path 列名修正
+- `query_sessions` SQL 选的是 `path`，但当前版本 OpenCode SQLite schema 里这一列叫 `directory`；旧 SQL 在新 OpenCode 上回退到 COALESCE 的空串，会话列表显示不出工作目录
+- 改为 `COALESCE(directory, '')`
+
+### Changed
+
+#### Codex / OpenCode 使用统计新增 reasoning_tokens 维度
+- 新增 `total_reasoning_tokens` + 日维度 `reasoning_tokens`，从 `tokens.reasoning` 字段读取
+- 这部分 token 已经计入 `output_tokens` 内部，新字段只是单独暴露，方便前端展示"思考 token 占输出比例"
+
+#### Cursor CLI stats struct 与 Cursor IDE 对齐
+- `cursor_cli::commands::stats` 跟随 `CursorStats` 结构新增 `total_cache_read_tokens` / `total_cache_write_tokens` / `estimated_cost` / `data_source` / `auth_status` / `auth_error` 字段
+- Cursor CLI 永远不访问 cursor.com，`auth_status` 固定 `"ok"` 表示"无需鉴权"，token 字段保持 0（CLI 本地也不存 token）
+
 ## [0.5.15] - 2026-05-14
 
 ### Fixed

@@ -90,6 +90,13 @@ fn get_first_prompt(conn: &Connection, session_id: &str) -> Option<String> {
     if text.len() <= 100 {
         Some(text.to_string())
     } else {
-        Some(format!("{}...", &text[..100]))
+        // `&text[..100]` panics when the 100th byte lands inside a multi-byte
+        // UTF-8 char (e.g. Chinese, where each char is 3 bytes). Walk back to
+        // the nearest char boundary before slicing.
+        let mut cut = 100;
+        while cut > 0 && !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        Some(format!("{}...", &text[..cut]))
     }
 }

@@ -184,13 +184,54 @@ fn save_high_water(marks: &HashMap<String, UsageRecord>) {
     }
 }
 
+/// One-time migration: before 0.5.x the cursor reporter wrote bubble-derived
+/// token counts (input+output only, missing cache_read/write) under the real
+/// workspace project name. Newer code emits accurate API totals under the
+/// special project `(cursor)` instead, and reports zero tokens for the local
+/// workspace rows. The high-water "max" semantics would otherwise pin those
+/// old wrong values forever, double-counting on the server dashboard.
+///
+/// This migration deletes every cursor HW entry whose project is NOT `(cursor)`
+/// — they will be recreated this round with zero token columns and the server
+/// upsert will overwrite the stale rows. We mark completion with a flag file
+/// so the migration runs at most once per machine.
+fn migrate_cursor_hw_2026_05() {
+    let Some(dir) = state_dir() else { return };
+    let flag = dir.join("cursor-hw-migrated-2026-05.flag");
+    if flag.exists() {
+        return;
+    }
+    let mut marks = load_high_water();
+    let before = marks.len();
+    marks.retain(|key, _| {
+        // key format: "tool|date|project|model"
+        if !key.starts_with("cursor|") {
+            return true;
+        }
+        let parts: Vec<&str> = key.splitn(4, '|').collect();
+        // Malformed keys: keep them as-is rather than risk dropping non-cursor data.
+        if parts.len() < 4 {
+            return true;
+        }
+        parts[2] == "(cursor)"
+    });
+    let removed = before.saturating_sub(marks.len());
+    if removed > 0 {
+        save_high_water(&marks);
+        eprintln!(
+            "[AutoReport] migrated cursor high-water: removed {} stale workspace-project entries",
+            removed
+        );
+    }
+    let _ = std::fs::write(&flag, b"1");
+}
+
 /// Merge freshly-scanned records against the stored high-water marks.
 /// For each metric we take the max, so reported values never decrease.
 /// Also backfills any date/project/model that existed historically but is
 /// now missing locally (e.g., files deleted) so the server keeps seeing it.
 fn apply_high_water(tool: &str, scanned: Vec<UsageRecord>) -> Vec<UsageRecord> {
     let mut marks = load_high_water();
-
     // Merge each scanned record with its mark, updating the mark with the max.
     let mut merged: HashMap<String, UsageRecord> = HashMap::new();
     for rec in scanned {
@@ -269,6 +310,9 @@ async fn send_tool_report(
 
 /// Send usage reports for ALL tools to the server
 pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
+    // Idempotent: only deletes stale cursor HW marks the first time it runs.
+    migrate_cursor_hw_2026_05();
+
     let url = format!("{}/api/report", server_url.trim_end_matches('/'));
     // Bypass system proxies: the report server is on an internal network (172.x)
     // and macOS GUI apps inherit system proxy settings (e.g. Clash on 127.0.0.1:7890)
@@ -339,7 +383,7 @@ fn collect_codex_records() -> Result<Vec<UsageRecord>, String> {
             .map(|m| short_name_from_path(&m.cwd))
             .unwrap_or_else(|| "unknown".to_string());
         let model = meta.as_ref()
-            .and_then(|m| m.model_provider.clone())
+            .and_then(|m| m.model.clone().or_else(|| m.model_provider.clone()))
             .unwrap_or_else(|| "unknown".to_string());
 
         let deltas = extract_token_deltas(file_path);
@@ -397,43 +441,31 @@ fn collect_codex_records() -> Result<Vec<UsageRecord>, String> {
 
 fn collect_opencode_records() -> Result<Vec<UsageRecord>, String> {
     use crate::opencode::parser::db_reader;
+    use std::collections::HashSet;
 
     let conn = match db_reader::open_db() {
         Ok(c) => c,
         Err(_) => return Ok(Vec::new()), // DB not found — no OpenCode data
     };
 
-    // Query all sessions with their project worktree and timestamps
-    let mut stmt = conn.prepare(
-        "SELECT s.id, COALESCE(p.worktree, ''), s.time_updated \
-         FROM session s \
-         LEFT JOIN project p ON s.project_id = p.id \
-         ORDER BY s.time_updated DESC"
-    ).map_err(|e| format!("Failed to prepare opencode session query: {}", e))?;
-
-    let session_rows: Vec<(String, String, i64)> = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)?,
-        ))
-    })
-    .map_err(|e| format!("Failed to query opencode sessions: {}", e))?
-    .filter_map(|r| r.ok())
-    .collect();
-
-    if session_rows.is_empty() {
+    // Pull every assistant message + its project worktree in a single query.
+    // Aggregating at the message level (not session level) lets cross-midnight
+    // sessions credit each day correctly, and keys the model field on the
+    // real `providerID/modelID` instead of a hard-coded "opencode".
+    let messages = db_reader::query_all_assistant_messages_with_worktree(&conn);
+    if messages.is_empty() {
         return Ok(Vec::new());
     }
 
-    let mut records = Vec::new();
-    for (session_id, worktree, time_updated_ms) in &session_rows {
-        // Convert ms timestamp to YYYY-MM-DD date string
-        let date = db_reader::ms_to_rfc3339(*time_updated_ms)
-            .get(..10)
-            .unwrap_or("")
-            .to_string();
+    type AggKey = (String, String, String); // (date, project, model)
+    // (input, output, cache_read, cache_write, msg_count, sessions_set)
+    type AggVal = (u64, u64, u64, u64, u64, HashSet<String>);
+    let mut agg: HashMap<AggKey, AggVal> = HashMap::new();
 
+    for (msg, worktree) in &messages {
+        let date = chrono::DateTime::from_timestamp(msg.time_created / 1000, 0)
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
         if date.is_empty() {
             continue;
         }
@@ -444,22 +476,68 @@ fn collect_opencode_records() -> Result<Vec<UsageRecord>, String> {
             crate::shared_models::basename(worktree)
         };
 
-        let msg_count = db_reader::count_messages_for_session(&conn, session_id) as u64;
+        let provider = msg
+            .data
+            .get("providerID")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let model_id = msg
+            .data
+            .get("modelID")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let model = format!("{}/{}", provider, model_id);
 
-        records.push(UsageRecord {
-            date,
-            project,
-            model: "opencode".to_string(),
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_creation_tokens: 0,
-            session_count: 1,
-            message_count: msg_count,
-        });
+        // OpenCode message data carries the canonical token shape:
+        //   tokens: { input, output, reasoning, cache: { read, write } }
+        // Missing keys mean 0 (e.g. non-thinking models leave reasoning at 0).
+        let tokens = msg.data.get("tokens");
+        let input = tokens
+            .and_then(|t| t.get("input"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let output = tokens
+            .and_then(|t| t.get("output"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_read = tokens
+            .and_then(|t| t.get("cache"))
+            .and_then(|c| c.get("read"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_write = tokens
+            .and_then(|t| t.get("cache"))
+            .and_then(|c| c.get("write"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let entry = agg
+            .entry((date, project, model))
+            .or_insert((0, 0, 0, 0, 0, HashSet::new()));
+        entry.0 += input;
+        entry.1 += output;
+        entry.2 += cache_read;
+        entry.3 += cache_write;
+        entry.4 += 1;
+        entry.5.insert(msg.session_id.clone());
     }
 
-    Ok(records)
+    Ok(agg
+        .into_iter()
+        .map(|((date, project, model), (input, output, cr, cw, msgs, sessions))| {
+            UsageRecord {
+                date,
+                project,
+                model,
+                input_tokens: input,
+                output_tokens: output,
+                cache_read_tokens: cr,
+                cache_creation_tokens: cw,
+                session_count: sessions.len() as u64,
+                message_count: msgs,
+            }
+        })
+        .collect())
 }
 
 // ── Copilot collection ───────────────────────────────────────
@@ -498,7 +576,93 @@ fn collect_copilot_records() -> Result<Vec<UsageRecord>, String> {
 
 // ── Cursor collection ───────────────────────────────────────
 
+/// Cursor stats path:
+/// 1. Pull authoritative token data from Cursor's official API
+///    (`cursor.com/api/dashboard/export-usage-events-csv`). This is the only
+///    place that exposes cache_read / cache_write correctly — local SQLite
+///    bubbles only carry input/output and miss ~80%+ of real Agent usage.
+/// 2. Aggregate API rows by (date, model) under project="(cursor)" since the
+///    CSV has no per-project breakdown. session_count/message_count are zeroed
+///    on the API side — local records below own those dimensions to keep the
+///    server's totals additive and not double-counted.
+/// 3. Still scan local composer + transcripts for per-project session /
+///    message counts (with tokens forced to zero to avoid double-counting).
+/// 4. When the API call fails (auth expired, network blocked, etc.) we DO NOT
+///    fall back to the wrong bubble token path — instead we report local
+///    session/message activity with zero tokens. Server-side high-water marks
+///    preserve any previously-correct API values, and the dashboard sees
+///    "no token data this round" rather than half-wrong numbers.
 fn collect_cursor_records() -> Result<Vec<UsageRecord>, String> {
+    match crate::cursor::api::usage_csv::fetch_usage_rows() {
+        Ok(rows) => {
+            let api_records = aggregate_cursor_api_rows(rows);
+            let mut local_records = collect_cursor_local_records()?;
+            // Tokens already counted from API — zero out local side to prevent
+            // double counting; keep only session/message dimensions.
+            for r in local_records.iter_mut() {
+                r.input_tokens = 0;
+                r.output_tokens = 0;
+                r.cache_read_tokens = 0;
+                r.cache_creation_tokens = 0;
+            }
+            let mut out = api_records;
+            out.extend(local_records);
+            Ok(out)
+        }
+        Err(e) => {
+            // Auth/network problem. Reporting bubble-only tokens here would
+            // poison server totals (missing cache → values land 5–10× low).
+            // We instead emit session/message activity per project with zero
+            // tokens; the high-water mechanism keeps prior correct totals.
+            eprintln!("[AutoReport] cursor api unavailable ({}), reporting sessions/messages only with zero tokens", e);
+            let mut local_records = collect_cursor_local_records()?;
+            for r in local_records.iter_mut() {
+                r.input_tokens = 0;
+                r.output_tokens = 0;
+                r.cache_read_tokens = 0;
+                r.cache_creation_tokens = 0;
+            }
+            Ok(local_records)
+        }
+    }
+}
+
+fn aggregate_cursor_api_rows(rows: Vec<crate::cursor::api::usage_csv::CursorUsageRow>) -> Vec<UsageRecord> {
+    // Aggregate by (date, model). Matches Cursor's official dashboard:
+    //   - Tokens: ALL rows count (billable + non-billable). The Cursor panel's
+    //     "Total Tokens" column does the same — TokenTracker (the reference
+    //     impl we compared against) likewise normalizes without filtering.
+    //   - session_count/message_count: zero on the API side; local scan owns
+    //     those dimensions. A CSV row is a usage event (one model call),
+    //     not a session, so counting 1-per-row here would double-count when
+    //     merged with the local-side records below.
+    type Key = (String, String);
+    let mut agg: HashMap<Key, (u64, u64, u64, u64)> = HashMap::new();
+    // tuple: (input, output, cache_read, cache_write)
+    for r in rows {
+        let key = (r.date.clone(), r.model.clone());
+        let e = agg.entry(key).or_insert((0, 0, 0, 0));
+        e.0 += r.input_tokens;
+        e.1 += r.output_tokens;
+        e.2 += r.cache_read_tokens;
+        e.3 += r.cache_write_tokens;
+    }
+    agg.into_iter()
+        .map(|((date, model), (input, output, cread, cwrite))| UsageRecord {
+            date,
+            project: "(cursor)".to_string(),
+            model,
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: cread,
+            cache_creation_tokens: cwrite,
+            session_count: 0,
+            message_count: 0,
+        })
+        .collect()
+}
+
+fn collect_cursor_local_records() -> Result<Vec<UsageRecord>, String> {
     use crate::cursor::parser::agent_transcripts as at;
     use crate::cursor::parser::project_scanner::{
         read_composer_headers, read_bubbles, epoch_ms_to_rfc3339,

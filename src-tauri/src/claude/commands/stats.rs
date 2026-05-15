@@ -8,7 +8,9 @@ use crate::claude::models::stats::{
     ModelUsageEntry, ProjectTokenEntry, SessionEfficiency, StatsCache, ToolCallEntry,
     TokenUsageSummary,
 };
-use crate::claude::parser::path_encoder::{get_projects_dir, get_stats_cache_path, short_name_from_path};
+use crate::claude::parser::path_encoder::{
+    get_projects_dir, get_stats_cache_path, list_session_jsonl_files, short_name_from_path,
+};
 
 pub fn get_global_stats() -> Result<StatsCache, String> {
     let path = get_stats_cache_path().ok_or("Could not find stats cache path")?;
@@ -78,21 +80,7 @@ fn merge_incremental(mut base: StatsCache, cutoff_date: String) -> Result<StatsC
             continue;
         }
 
-        let files = match fs::read_dir(&path) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-
-        for file_entry in files.flatten() {
-            let file_path = file_entry.path();
-            if !file_path
-                .extension()
-                .map(|e| e == "jsonl")
-                .unwrap_or(false)
-            {
-                continue;
-            }
-
+        for file_path in list_session_jsonl_files(&path) {
             let mtime = match file_path.metadata().and_then(|m| m.modified()) {
                 Ok(t) => t,
                 Err(_) => continue,
@@ -409,25 +397,13 @@ fn compute_stats_from_sessions() -> Result<StatsCache, String> {
             continue;
         }
 
-        let files = match fs::read_dir(&path) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-
-        for file_entry in files.flatten() {
-            let file_path = file_entry.path();
-            if file_path
-                .extension()
-                .map(|e| e == "jsonl")
-                .unwrap_or(false)
-            {
-                scan_session_for_stats(
-                    &file_path,
-                    &mut daily_stats,
-                    &mut daily_model_tokens,
-                    &mut model_usage,
-                );
-            }
+        for file_path in list_session_jsonl_files(&path) {
+            scan_session_for_stats(
+                &file_path,
+                &mut daily_stats,
+                &mut daily_model_tokens,
+                &mut model_usage,
+            );
         }
     }
 
@@ -654,35 +630,23 @@ pub fn get_advanced_stats() -> Result<AdvancedStats, String> {
 
         let project_name = resolve_project_name(&path);
 
-        let files = match fs::read_dir(&path) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
+        for file_path in list_session_jsonl_files(&path) {
+            let result = scan_session_advanced(&file_path);
+            // Accumulate project tokens
+            let proj = project_tokens.entry(project_name.clone()).or_insert((0, 0, 0));
+            proj.0 += result.total_tokens;
+            proj.1 += result.input_tokens;
+            proj.2 += result.output_tokens;
+            total_tokens_all += result.total_tokens;
 
-        for file_entry in files.flatten() {
-            let file_path = file_entry.path();
-            if file_path
-                .extension()
-                .map(|e| e == "jsonl")
-                .unwrap_or(false)
-            {
-                let result = scan_session_advanced(&file_path);
-                // Accumulate project tokens
-                let proj = project_tokens.entry(project_name.clone()).or_insert((0, 0, 0));
-                proj.0 += result.total_tokens;
-                proj.1 += result.input_tokens;
-                proj.2 += result.output_tokens;
-                total_tokens_all += result.total_tokens;
+            // Accumulate tool calls
+            for (name, count) in &result.tool_calls {
+                *tool_calls.entry(name.clone()).or_insert(0) += count;
+            }
 
-                // Accumulate tool calls
-                for (name, count) in &result.tool_calls {
-                    *tool_calls.entry(name.clone()).or_insert(0) += count;
-                }
-
-                // Track session message count
-                if result.message_count > 0 {
-                    session_msg_counts.push(result.message_count);
-                }
+            // Track session message count
+            if result.message_count > 0 {
+                session_msg_counts.push(result.message_count);
             }
         }
     }
@@ -762,27 +726,23 @@ pub fn get_advanced_stats() -> Result<AdvancedStats, String> {
 
 /// Resolve project name from a project directory by reading cwd from session files
 fn resolve_project_name(project_dir: &Path) -> String {
-    // Try to read cwd from a session file
-    if let Ok(dir_entries) = fs::read_dir(project_dir) {
-        for entry in dir_entries.flatten() {
-            let file_path = entry.path();
-            if file_path.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                let file = match fs::File::open(&file_path) {
-                    Ok(f) => f,
-                    Err(_) => continue,
-                };
-                let reader = BufReader::new(file);
-                for line in reader.lines().take(10) {
-                    let line = match line {
-                        Ok(l) => l,
-                        Err(_) => continue,
-                    };
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-                        if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
-                            if !cwd.is_empty() {
-                                return short_name_from_path(cwd);
-                            }
-                        }
+    // Try to read cwd from a session file (subagent files inherit cwd too,
+    // so the recursive listing is fine here).
+    for file_path in list_session_jsonl_files(project_dir) {
+        let file = match fs::File::open(&file_path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let reader = BufReader::new(file);
+        for line in reader.lines().take(10) {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
+                    if !cwd.is_empty() {
+                        return short_name_from_path(cwd);
                     }
                 }
             }
