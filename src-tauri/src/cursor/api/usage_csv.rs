@@ -130,16 +130,25 @@ fn parse_csv(csv: &str) -> Vec<CursorUsageRow> {
     let total_i = match idx.get("Total Tokens") {
         Some(i) => *i, None => return Vec::new()
     };
-    let cost_i = match idx.get("Cost") { Some(i) => *i, None => return Vec::new() };
+    // 2026-05 起 cursor.com 的 export-usage-events-csv 把 Cost 列移除,
+    // 改用 "Requests" 列(单次事件计数)。Cost 列回不来,把它降级为可选 ——
+    // 缺失时按 0 处理,UI 的"估算费用"卡片会显示 $0,但 token 维度照常解析。
+    // 旧版 CSV (仍可能在客户老缓存里出现) 继续兼容。
+    let cost_i = idx.get("Cost").copied();
     let kind_i = idx.get("Kind").copied();
     let max_mode_i = idx.get("Max Mode").copied();
 
-    let min_len = [date_i, model_i, input_with_i, input_without_i, cache_read_i, output_i, total_i, cost_i]
-        .iter()
-        .max()
-        .copied()
-        .unwrap_or(0)
-        + 1;
+    let min_len = {
+        let mut m = [date_i, model_i, input_with_i, input_without_i, cache_read_i, output_i, total_i]
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0);
+        if let Some(i) = cost_i { if i > m { m = i; } }
+        if let Some(i) = kind_i { if i > m { m = i; } }
+        if let Some(i) = max_mode_i { if i > m { m = i; } }
+        m + 1
+    };
 
     let mut out = Vec::new();
     for line in lines {
@@ -153,7 +162,7 @@ fn parse_csv(csv: &str) -> Vec<CursorUsageRow> {
         let cache_read = to_u64(&fields[cache_read_i]);
         let output = to_u64(&fields[output_i]);
         let total = to_u64(&fields[total_i]);
-        let cost = to_f64(&fields[cost_i]);
+        let cost = cost_i.map(|i| to_f64(&fields[i])).unwrap_or(0.0);
         let kind = kind_i
             .map(|i| strip_quotes(&fields[i]).to_string())
             .unwrap_or_else(|| "unknown".to_string());
@@ -200,7 +209,9 @@ fn is_billable_kind(kind: &str) -> bool {
     if k.is_empty() {
         return true;
     }
-    if k.contains("no charge") || k == "free" {
+    // "no charge" / "free" — 老格式的非计费值
+    // "included"          — 2026-05 新版 CSV 引入,订阅内事件 cursor.com 显示 $0
+    if k.contains("no charge") || k == "free" || k == "included" {
         return false;
     }
     true

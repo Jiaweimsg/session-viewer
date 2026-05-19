@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.25] - 2026-05-19
+
+### Fixed
+
+#### Cursor 使用统计页 UI 漏展 cache_read / cache_write
+- 现象：0.5.23 接入 cursor.com 官方接口后,后端 `CursorStats` 已带回完整 `totalCacheReadTokens` / `totalCacheWriteTokens` / `totalTokens`(含 cache 四项之和),但前端 `CursorStatsView` 从未读取这些字段,Token 卡片仅显示 input/output、堆叠图也只画 input+output;在 Agent 长会话场景下用户看到的数字仅占真实 token 的 15-20%(cache_read 通常占 70-85%),对照 cursor.com Dashboard 必然觉得"少了一大半"
+- 前端补齐:`CursorDailyTokenEntry` TS 类型增加 `cacheReadTokens` / `cacheWriteTokens` / `cost` 字段(后端早已传入,TS 类型未声明导致编译器看不见);`CursorStatsView` 总览卡片从 7 张改为 10 张(5 列两行),新增 **总 Token (含缓存)** / **Cache Read** / **Cache Write** / **Cursor 计费 ($)** 四张;每日 Token 堆叠柱图从 2 段(input + output)扩为 4 段(cacheRead + cacheWrite + input + output),Tooltip 支持四种中英文 label
+- 删除"估算总请求(含Tab)"卡片(×1.8 经验系数,无法对照 cursor.com)
+
+#### Cursor CSV 新列名兼容 + Included 事件 non-billable
+- 现象:2026-05 起 cursor.com 的 `/api/dashboard/export-usage-events-csv` 导出列名变更——`Cost` 列移除,新增 `Cloud Agent ID` / `Automation ID` / `Requests`;同时 `Kind` 出现新值 `Included`(订阅内事件)。`parse_csv` 当前把 Cost 列当必需,缺失时直接 `return Vec::new()`,会让所有 token 解析失败;`is_billable_kind` 把 `Included` 当 billable 累加 cost
+- `Cost` 降级为可选列:缺失时 cost=0(`Cursor 计费` 卡显示 $0,token 维度照常解析)。当前 `?strategy=tokens` 接口仍带 Cost 列,但 cursor 后端早晚会跟 dashboard 对齐,提前兼容
+- `is_billable_kind` 把 `included` 加入 non-billable(与 `no charge` / `free` 同列),订阅内事件 cost 不再累计
+
+#### Cursor 统计页文案诚实化
+- 每日 Token 图说明:"与 cursor.com Dashboard 一致" 改为 "与 cursor.com CSV 用量接口一致;Dashboard 对 thinking 模型有内部加权,可能有 ~5% 偏差,以 CSV 为准"
+- "估算费用" 卡片改名 `Cursor 计费 ($)`,悬停 tooltip 说明:"cursor.com CSV 给订阅内 (Included) 事件的内部计费,通常远低于 Anthropic API 真实价格 (~$1/M tokens),也不等于你付的 Cursor 月费"
+- `StatCard` 组件新增可选 `hint` prop,带 hint 时 label 末加 ⓘ,整张卡片可悬停看说明
+
 ## [0.5.23] - 2026-05-15
 
 ### Added

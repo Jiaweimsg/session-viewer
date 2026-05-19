@@ -641,6 +641,18 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
   const filteredOutput = selectedMonth === "all"
     ? (stats.totalOutputTokens ?? 0)
     : filteredTokens.reduce((s, d) => s + d.outputTokens, 0);
+  const filteredCacheRead = selectedMonth === "all"
+    ? (stats.totalCacheReadTokens ?? 0)
+    : filteredTokens.reduce((s, d) => s + d.cacheReadTokens, 0);
+  const filteredCacheWrite = selectedMonth === "all"
+    ? (stats.totalCacheWriteTokens ?? 0)
+    : filteredTokens.reduce((s, d) => s + d.cacheWriteTokens, 0);
+  const filteredTotalTokens = selectedMonth === "all"
+    ? (stats.totalTokens ?? 0)
+    : filteredTokens.reduce((s, d) => s + d.totalTokens, 0);
+  const filteredCost = selectedMonth === "all"
+    ? (stats.estimatedCost ?? 0)
+    : filteredTokens.reduce((s, d) => s + (d.cost ?? 0), 0);
 
   const activityData = filteredActivity.map((d) => ({
     date: d.date,
@@ -652,6 +664,8 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
     date: d.date,
     input: d.inputTokens,
     output: d.outputTokens,
+    cacheRead: d.cacheReadTokens,
+    cacheWrite: d.cacheWriteTokens,
     total: d.totalTokens,
   }));
 
@@ -706,7 +720,7 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-7 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         <StatCard
           icon={<Calendar className="w-5 h-5" />}
           label="总会话数"
@@ -721,17 +735,19 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
           ).toLocaleString()}
         />
         <StatCard
-          icon={<Zap className="w-5 h-5" />}
-          label="估算总请求(含Tab)"
-          value={Math.round((selectedMonth === "all"
-            ? (stats.totalRequests ?? 0)
-            : filteredActivity.reduce((s, d) => s + d.messageCount, 0)
-          ) * 1.8).toLocaleString()}
-        />
-        <StatCard
           icon={<MessageSquare className="w-5 h-5" />}
           label="总消息数"
           value={totalMessages.toLocaleString()}
+        />
+        <StatCard
+          icon={<FolderOpen className="w-5 h-5" />}
+          label="总项目数"
+          value={(stats.totalProjects ?? 0).toLocaleString()}
+        />
+        <StatCard
+          icon={<Activity className="w-5 h-5" />}
+          label="总 Token (含缓存)"
+          value={tokensReady ? formatTokens(filteredTotalTokens) : "—"}
         />
         <StatCard
           icon={<Activity className="w-5 h-5" />}
@@ -744,9 +760,20 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
           value={tokensReady ? formatTokens(filteredOutput) : "—"}
         />
         <StatCard
-          icon={<FolderOpen className="w-5 h-5" />}
-          label="总项目数"
-          value={(stats.totalProjects ?? 0).toLocaleString()}
+          icon={<Activity className="w-5 h-5" />}
+          label="Cache Read"
+          value={tokensReady ? formatTokens(filteredCacheRead) : "—"}
+        />
+        <StatCard
+          icon={<Activity className="w-5 h-5" />}
+          label="Cache Write"
+          value={tokensReady ? formatTokens(filteredCacheWrite) : "—"}
+        />
+        <StatCard
+          icon={<Activity className="w-5 h-5" />}
+          label="Cursor 计费($)"
+          value={tokensReady ? `$${filteredCost.toFixed(2)}` : "—"}
+          hint="cursor.com CSV 给订阅内 (Included) 事件的内部计费,通常远低于 Anthropic API 真实价格 (~$1/M tokens),也不等于你付的 Cursor 月费。仅供横向对比,不代表实际支出。"
         />
       </div>
 
@@ -786,7 +813,7 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
           <h2 className="text-sm font-medium mb-1">每日 Token 用量</h2>
           <p className="text-xs text-muted-foreground mb-4">
             {dataSourceIsApi
-              ? "数据来源:Cursor 官方用量接口(含 cache_read / cache_write,与 cursor.com Dashboard 一致)。"
+              ? "数据来源:Cursor 官方 CSV 用量接口 (含 cache_read / cache_write)。注意:cursor.com Dashboard 显示的 Tokens 对 thinking 模型有内部加权,与 CSV 原始字段可能有 ~5% 偏差,以 CSV 为准。"
               : "仅覆盖 Cursor 旧版 Chat Composer 消息的 token;Agent 模式与 Tab completion 的 token 不在本地记录,准确值请查 Cursor 官方 Dashboard。"}
           </p>
           <ResponsiveContainer width="100%" height={250}>
@@ -807,13 +834,20 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
                   borderRadius: "6px",
                   fontSize: 12,
                 }}
-                formatter={(value: number, name: string) => [
-                  formatTokens(value),
-                  name === "input" ? "输入" : "输出",
-                ]}
+                formatter={(value: number, name: string) => {
+                  const label =
+                    name === "input" ? "输入"
+                    : name === "output" ? "输出"
+                    : name === "cacheRead" ? "Cache Read"
+                    : name === "cacheWrite" ? "Cache Write"
+                    : name;
+                  return [formatTokens(value), label];
+                }}
               />
-              <Bar dataKey="input" stackId="tokens" fill="#8b5cf6" name="input" radius={[0, 0, 0, 0]} />
-              <Bar dataKey="output" stackId="tokens" fill="#c084fc" name="output" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="cacheRead"  stackId="tokens" fill="#22c55e" name="cacheRead"  radius={[0, 0, 0, 0]} />
+              <Bar dataKey="cacheWrite" stackId="tokens" fill="#16a34a" name="cacheWrite" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="input"      stackId="tokens" fill="#8b5cf6" name="input"      radius={[0, 0, 0, 0]} />
+              <Bar dataKey="output"     stackId="tokens" fill="#c084fc" name="output"     radius={[2, 2, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -1042,16 +1076,18 @@ function StatCard({
   icon,
   label,
   value,
+  hint,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
+  hint?: string;
 }) {
   return (
-    <div className="bg-card border border-border rounded-lg p-4">
+    <div className="bg-card border border-border rounded-lg p-4" title={hint}>
       <div className="flex items-center gap-2 text-muted-foreground mb-2">
         {icon}
-        <span className="text-xs">{label}</span>
+        <span className="text-xs">{label}{hint ? " ⓘ" : ""}</span>
       </div>
       <div className="text-2xl font-bold">{value}</div>
     </div>
