@@ -74,16 +74,29 @@ export function Podium() {
 
 function YourRankBanner({ data }: { data: RankingPayload }) {
   const hasRank = data.your_rank != null;
-  // Gap-to-next-rank text. Three cases:
-  //   - rank 1: lead over rank 2 (use top3[1] if present)
-  //   - rank > 1: server-provided your_next_cost
+  // "Above" chip = catch-up target. Three cases:
+  //   - rank 1: lead over rank 2 (use top3[1] for both cost and name)
+  //   - rank > 1: server-provided your_next_cost + your_next_name
   //   - no rank: nothing to compare
+  // Falls back to "#N-1" / "#2" when a neighbor name isn't piggybacked
+  // (older server, or future shape change) — keeps banner readable.
   let gapText: string | null = null;
   if (data.your_rank === 1) {
-    const runnerUp = data.top3[1]?.estimated_cost;
-    if (runnerUp != null) gapText = `领先 #2 ${formatCost(data.your_cost - runnerUp)}`;
+    const runnerUp = data.top3[1];
+    if (runnerUp != null) {
+      const runnerUpName = displayName(runnerUp.remark, runnerUp.name, runnerUp.email);
+      gapText = `👑 领先 ${shortName(runnerUpName)} $${(data.your_cost - runnerUp.estimated_cost).toFixed(2)}`;
+    }
   } else if (data.your_rank != null && data.your_next_cost != null) {
-    gapText = `差 ${formatCost(data.your_next_cost - data.your_cost)} 追上 #${data.your_rank - 1}`;
+    const aboveLabel = shortName(data.your_next_name) ?? `#${data.your_rank - 1}`;
+    gapText = `⚠️ 仅差 ${formatCost(data.your_next_cost - data.your_cost)} 反超 ${aboveLabel}`;
+  }
+  // "Chaser" chip = the person right behind, breathing down your neck.
+  // Renders only when there IS a chaser; missing on last place or no rank.
+  let chaserText: string | null = null;
+  if (hasRank && data.your_chaser_cost != null) {
+    const chaserLabel = shortName(data.your_chaser_name) ?? `#${(data.your_rank as number) + 1}`;
+    chaserText = `🔥 ${chaserLabel} 紧咬不放 仅差 ${formatCost(data.your_cost - data.your_chaser_cost)}`;
   }
   return (
     <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-950/30 dark:to-yellow-950/30 dark:border-amber-900/50 px-4 py-2.5 text-sm">
@@ -108,6 +121,11 @@ function YourRankBanner({ data }: { data: RankingPayload }) {
                 {gapText}
               </span>
             )}
+            {chaserText && (
+              <span className="text-xs px-2 py-0.5 rounded bg-amber-200/60 dark:bg-amber-800/40 text-amber-900 dark:text-amber-100">
+                {chaserText}
+              </span>
+            )}
           </>
         ) : (
           <span className="text-muted-foreground">今日你还没消耗记录</span>
@@ -115,6 +133,20 @@ function YourRankBanner({ data }: { data: RankingPayload }) {
       </div>
     </div>
   );
+}
+
+/** Pick the best human-readable name from a ranking entry — same priority
+ *  Podium cards use (`Podium.tsx:157`). Falls back to email when no overlay. */
+function displayName(remark: string | null, name: string | null, email: string): string {
+  return remark || name || email;
+}
+
+/** Truncate a name with `…` so the banner doesn't get blown out by a long
+ *  remark or full email. Null/undefined passes through so the caller can
+ *  fall back to a `#rank` label. */
+function shortName(s: string | null | undefined, max = 12): string | null {
+  if (s == null) return null;
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
 const MEDAL_STYLE: Record<string, { bg: string; bar: string; emoji: string; label: string; order: string; raise: string }> = {

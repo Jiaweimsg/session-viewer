@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.27] - 2026-05-20
+
+### Added
+
+#### Stats 页排行横幅:新增"下一名追你"chip + 用真实名字替换 `#rank`
+- 现象:0.5.26 上线的"今日排行"横幅只展示「差 $X.XX 追上 #N-1」 —— 单向看"你要追上谁",对处在第 #2、#3 这种夹心位置的人,完全感知不到"#3 正在 $12 之外追你"。同时 `#1` / `#3` 这种纯编号缺少人情味,看了不知道是谁
+- 改成双向 + 实名 + 高紧迫文案:
+  - 在原有 chip 右边新增一枚同色 chip:「🔥 {下一名展示名} 紧咬不放 仅差 $X.XX」,末位/无 rank 不展示
+  - 原 chip 文案从「差 ... 追上 #N-1」升级为「⚠️ 仅差 ... 反超 {上一名展示名}」,反超 / 紧咬不放比"追上"更刺激,⚠️ 🔥 emoji 暗示后方威胁
+  - 冠军场景:「👑 领先 {亚军展示名} $X.XX」(只在第一名时显示)
+  - 展示名优先级 `remark > name > email`,沿用 Podium 卡片现有规则;超过 12 字符截断 `+ …`,避免长 email/备注把横幅撑破
+- 服务端配合(同步发版 0.4.3 镜像):`POST /api/report` 响应 `ranking` 对象新增 4 个字段
+  - `your_next_name`:上一名展示名(原 `your_next_cost` 之外的补充)
+  - `your_chaser_cost` / `your_chaser_name`:下一名 cost + 展示名;末位时均为 `null`
+  - 旧字段 `your_next_cost` 保留不变,0.5.26 客户端零影响
+
+### 兼容性
+- Rust `RankingPayload` 三个新字段全部 `#[serde(default)]`,**老服务端 + 新客户端**响应里没有这些字段时,banner 自动回退到 `#N-1` / `#N+1` 编号显示,不会崩
+- **新服务端 + 老客户端**:旧客户端只读 `your_next_cost`,忽略新字段,行为完全一致
+- 服务端新增 2 个测试用例(中间排名 / 冠军 + 追赶者)覆盖新字段,既有 3 个用例同步加断言;`npm test` 59/59 全绿
+
 ## [0.5.26] - 2026-05-20
 
 ### Added

@@ -80,6 +80,16 @@ export interface RankingPayload {
    *  rank 1 or has no spend today. Lets the UI show "差 $X.XX 追上 #N-1"
    *  even when the user is outside top 3. */
   your_next_cost: number | null;
+  /** Display name (remark || name || email) of the user one rank above —
+   *  so the banner can show "追上 alice" instead of "追上 #N-1" even when
+   *  that user isn't in top3. Null mirrors your_next_cost. Servers
+   *  <= 0.4.2 omit this. */
+  your_next_name: string | null;
+  /** Cost of the user one rank below — the chaser. Drives the "被追"
+   *  chip. Null when reporter is last or has no spend today. */
+  your_chaser_cost: number | null;
+  /** Display name of the chaser, same priority as your_next_name. */
+  your_chaser_name: string | null;
   total_ranked: number;
 }
 

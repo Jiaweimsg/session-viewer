@@ -55,6 +55,19 @@ pub struct RankingPayload {
     /// omit this; serde default keeps deserialization tolerant.
     #[serde(default)]
     pub your_next_cost: Option<f64>,
+    /// Display name (remark || name || email) of the user one rank above.
+    /// Lets the banner show real identities instead of "#N-1" when the
+    /// reporter is outside top3. Servers <= 0.4.2 omit this.
+    #[serde(default)]
+    pub your_next_name: Option<String>,
+    /// Cost of the user one rank below the reporter (the chaser). Drives
+    /// the "你被追" chip on the Stats banner. None when reporter is last
+    /// or has no spend today. Servers <= 0.4.2 omit this.
+    #[serde(default)]
+    pub your_chaser_cost: Option<f64>,
+    /// Display name of the chaser, same priority as your_next_name.
+    #[serde(default)]
+    pub your_chaser_name: Option<String>,
     pub total_ranked: u32,
 }
 
