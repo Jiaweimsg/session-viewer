@@ -295,11 +295,24 @@ pub fn resume_session(tool: String, session_id: String, work_dir: String, file_p
 }
 
 /// Dispatch command: report_usage
-/// Send usage data for all tools to a remote server
+/// Send usage data for all tools to a remote server. The server piggybacks
+/// today's leaderboard on the response — we stash it in AppState so the
+/// front-end's podium widget can read it via `get_latest_ranking`.
 #[tauri::command]
-pub async fn report_usage(server_url: String) -> Result<Value, String> {
-    let total = crate::report::send_all_reports(&server_url).await?;
-    Ok(serde_json::json!({ "ok": true, "received": total }))
+pub async fn report_usage(server_url: String, state: tauri::State<'_, AppState>) -> Result<Value, String> {
+    let (total, ranking) = crate::report::send_all_reports(&server_url).await?;
+    if let Some(rk) = ranking.clone() {
+        *state.latest_ranking.lock() = Some(rk);
+    }
+    Ok(serde_json::json!({ "ok": true, "received": total, "ranking": ranking }))
+}
+
+/// Latest ranking payload received from the server, or null if no report has
+/// completed yet this session.
+#[tauri::command]
+pub fn get_latest_ranking(state: tauri::State<'_, AppState>) -> Result<Value, String> {
+    let rk = state.latest_ranking.lock().clone();
+    Ok(serde_json::to_value(rk).unwrap_or(Value::Null))
 }
 
 /// Dispatch command: get_advanced_stats

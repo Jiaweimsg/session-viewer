@@ -34,6 +34,42 @@ pub struct ReportResponse {
     pub ok: Option<bool>,
     pub received: Option<u64>,
     pub error: Option<String>,
+    /// Server piggybacks today's global leaderboard on every successful upload
+    /// so clients can render a podium without a second authenticated call.
+    /// Older servers (≤ 0.4.0) won't send this — `None` is normal.
+    #[serde(default)]
+    pub ranking: Option<RankingPayload>,
+}
+
+/// Today's leaderboard + the reporter's own placement, returned by /api/report.
+/// Mirrors the server-side response shape in routes.ts.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RankingPayload {
+    pub date: String,
+    pub top3: Vec<RankingEntry>,
+    pub your_rank: Option<u32>,
+    pub your_cost: f64,
+    /// Cost of the user one rank above the reporter — lets the UI render
+    /// "差 $X.XX 追上 #N-1" even when the reporter is outside the top 3.
+    /// None when reporter is rank 1 or has no spend today. Servers <= 0.4.1
+    /// omit this; serde default keeps deserialization tolerant.
+    #[serde(default)]
+    pub your_next_cost: Option<f64>,
+    pub total_ranked: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RankingEntry {
+    pub rank: u32,
+    /// "gold" | "silver" | "bronze" | null
+    pub medal: Option<String>,
+    pub email: String,
+    pub name: Option<String>,
+    pub remark: Option<String>,
+    pub client_version: Option<String>,
+    pub total_tokens: u64,
+    pub estimated_cost: f64,
+    pub message_count: Option<u64>,
 }
 
 /// Read a value from global git config; empty/missing → None.
@@ -276,7 +312,7 @@ async fn send_tool_report(
     machine_id: &str,
 ) -> Result<ReportResponse, String> {
     if records.is_empty() {
-        return Ok(ReportResponse { ok: Some(true), received: Some(0), error: None });
+        return Ok(ReportResponse { ok: Some(true), received: Some(0), error: None, ranking: None });
     }
 
     let payload = ReportPayload {
@@ -308,8 +344,11 @@ async fn send_tool_report(
         .map_err(|e| format!("Failed to parse response: {}", e))
 }
 
-/// Send usage reports for ALL tools to the server
-pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
+/// Send usage reports for ALL tools to the server.
+/// Returns (total records received by server, latest ranking payload if any).
+/// Each per-tool response carries the SAME global ranking (server computes it
+/// without filtering by tool), so we just keep the last one we saw.
+pub async fn send_all_reports(server_url: &str) -> Result<(u64, Option<RankingPayload>), String> {
     // Idempotent: only deletes stale cursor HW marks the first time it runs.
     migrate_cursor_hw_2026_05();
 
@@ -326,6 +365,7 @@ pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
     let machine_id = get_machine_id();
 
     let mut total_received: u64 = 0;
+    let mut latest_ranking: Option<RankingPayload> = None;
 
     // Collect from each tool
     let tools: Vec<(&str, Result<Vec<UsageRecord>, String>)> = vec![
@@ -351,6 +391,9 @@ pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
                         let n = resp.received.unwrap_or(0);
                         eprintln!("[AutoReport] {}: sent {} records", tool_name, n);
                         total_received += n;
+                        if let Some(rk) = resp.ranking {
+                            latest_ranking = Some(rk);
+                        }
                     }
                     Err(e) => eprintln!("[AutoReport] {} error: {}", tool_name, e),
                 }
@@ -359,7 +402,7 @@ pub async fn send_all_reports(server_url: &str) -> Result<u64, String> {
         }
     }
 
-    Ok(total_received)
+    Ok((total_received, latest_ranking))
 }
 
 // ── Codex collection ─────────────────────────────────────────

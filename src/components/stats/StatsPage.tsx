@@ -26,6 +26,7 @@ import {
   TrendingUp,
   AlertTriangle,
 } from "lucide-react";
+import { Podium } from "./Podium";
 
 export function StatsPage() {
   const { activeTool, stats, tokenSummary, advancedStats, statsLoading, loadStats } =
@@ -47,25 +48,45 @@ export function StatsPage() {
   if (!stats && !tokenSummary) {
     return (
       <div className="p-6 text-muted-foreground">
+        <Podium />
         未找到统计数据。
       </div>
     );
   }
 
   if (activeTool === "codex" || activeTool === "opencode") {
-    return <CodexStats stats={stats as CodexTokenSummary} />;
+    return (
+      <div>
+        <div className="px-6 pt-6">
+          <Podium />
+        </div>
+        <CodexStats stats={stats as CodexTokenSummary} />
+      </div>
+    );
   }
 
   if (activeTool === "cursor" || activeTool === "copilot" || activeTool === "cursor-cli") {
-    return <CursorStatsView stats={stats as CursorStatsType} />;
+    return (
+      <div>
+        <div className="px-6 pt-6">
+          <Podium />
+        </div>
+        <CursorStatsView stats={stats as CursorStatsType} />
+      </div>
+    );
   }
 
   return (
-    <ClaudeStats
-      stats={stats as StatsCache}
-      tokenSummary={tokenSummary as ClaudeTokenSummary | null}
-      advancedStats={advancedStats as AdvancedStats | null}
-    />
+    <div>
+      <div className="px-6 pt-6">
+        <Podium />
+      </div>
+      <ClaudeStats
+        stats={stats as StatsCache}
+        tokenSummary={tokenSummary as ClaudeTokenSummary | null}
+        advancedStats={advancedStats as AdvancedStats | null}
+      />
+    </div>
   );
 }
 

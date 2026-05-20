@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.26] - 2026-05-20
+
+### Added
+
+#### Stats 页今日金银铜排行榜
+- 现象：以前要看「今天谁用得多」只能上服务端仪表盘（需要 admin 登录），普通用户没有任何团队对照视角。这一版给客户端 Stats 页顶部加了金银铜 podium + 你的全局排名横幅
+- 数据走现有的 `POST /api/report` 回程，**不需要二次鉴权调用** —— 服务端 0.4.2+ 在上报响应里嵌入 `ranking: { date, top3, your_rank, your_cost, your_next_cost, total_ranked }`，客户端 Rust 把它存到 `AppState.latest_ranking`，前端 30s 轮询一次
+- 横幅显示：「你排第 #N / X · $Y.YY」 + 「差 $Z.ZZ 追上 #N-1」 chip。冠军则显示「领先 #2 $X.XX」
+- podium 三张卡片：silver | gold(高一截) | bronze，金/银/铜小条 + medal emoji；每张卡底部也带「与上一名差距」 chip
+- 移动端竖排，gold 第一
+- 后台首次上报有 `REPORT_INITIAL_DELAY_SECS = 30` 延迟，所以冷启动 30 s 内 podium 是「加载中」；想立刻看从托盘菜单点「立即上报」即可
+
+#### 服务端关联改动（部署在 0.4.2 镜像）
+- `users` 表加 `remark` 列，admin 可在仪表盘点铅笔按钮把 git 名改成真名，所有展示链优先用 `remark || name || email`。客户端继续上报 git 名，UPDATE 不动 remark
+- 新 `GET /api/stats/ranking` 端点（仪表盘 podium 用）
+- 新 `PUT /api/users/:email/remark` 端点
+- Docker 容器 TZ 锁到 Asia/Shanghai，调试时 `date` / `new Date()` 不再差 8 小时
+- ranking 日期判定独立硬钉 Asia/Shanghai，与容器 TZ 无关，确保跨午夜也对
+
+### Tauri API 变更（仅影响 plugin 调用方）
+- `report_usage` 现在接收 `state: tauri::State<'_, AppState>`，返回值多 `ranking` 字段
+- 新增 `get_latest_ranking` 命令，返 `RankingPayload | null`
+
 ## [0.5.25] - 2026-05-19
 
 ### Fixed

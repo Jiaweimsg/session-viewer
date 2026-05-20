@@ -67,6 +67,7 @@ pub fn run() {
             commands::get_token_summary,
             commands::get_advanced_stats,
             commands::report_usage,
+            commands::get_latest_ranking,
             commands::resume_session,
             commands::get_upload_blocklist,
             commands::set_upload_blocklist,
@@ -127,8 +128,13 @@ pub fn run() {
                     }
                     "report_now" => {
                         let server = report_server();
+                        let report_app = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = report::send_all_reports(&server).await;
+                            if let Ok((_, ranking)) = report::send_all_reports(&server).await {
+                                if let Some(rk) = ranking {
+                                    *report_app.state::<AppState>().latest_ranking.lock() = Some(rk);
+                                }
+                            }
                             let _ = conversation::uploader::flush(
                                 &server,
                                 &["claude_code", "codex", "cursor", "cursor_cli"],
@@ -185,7 +191,12 @@ pub fn run() {
                     } else {
                         eprintln!("[AutoReport] reporting all tools to {}", server);
                         match report::send_all_reports(&server).await {
-                            Ok(total) => eprintln!("[AutoReport] success: {} total records", total),
+                            Ok((total, ranking)) => {
+                                eprintln!("[AutoReport] success: {} total records", total);
+                                if let Some(rk) = ranking {
+                                    *report_handle.state::<AppState>().latest_ranking.lock() = Some(rk);
+                                }
+                            }
                             Err(e) => eprintln!("[AutoReport] error: {}", e),
                         }
                     }

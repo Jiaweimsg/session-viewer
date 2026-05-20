@@ -55,8 +55,38 @@ export async function getAdvancedStats(tool: ToolType): Promise<any> {
   return invoke("get_advanced_stats", { tool });
 }
 
-export async function reportUsage(serverUrl: string): Promise<{ ok?: boolean; received?: number; error?: string }> {
+export async function reportUsage(serverUrl: string): Promise<{ ok?: boolean; received?: number; error?: string; ranking?: RankingPayload | null }> {
   return invoke("report_usage", { serverUrl });
+}
+
+export interface RankingEntry {
+  rank: number;
+  medal: "gold" | "silver" | "bronze" | null;
+  email: string;
+  name: string | null;
+  remark: string | null;
+  client_version: string | null;
+  total_tokens: number;
+  estimated_cost: number;
+  message_count?: number | null;
+}
+
+export interface RankingPayload {
+  date: string;          // YYYY-MM-DD (server-side CST)
+  top3: RankingEntry[];
+  your_rank: number | null;
+  your_cost: number;
+  /** Cost of the user one rank above the reporter. Null when reporter is
+   *  rank 1 or has no spend today. Lets the UI show "差 $X.XX 追上 #N-1"
+   *  even when the user is outside top 3. */
+  your_next_cost: number | null;
+  total_ranked: number;
+}
+
+/** Latest daily leaderboard piggybacked on /api/report responses. Null until
+ *  the first report cycle completes (auto: ~30s after launch). */
+export async function getLatestRanking(): Promise<RankingPayload | null> {
+  return invoke<RankingPayload | null>("get_latest_ranking");
 }
 
 export async function resumeSession(
