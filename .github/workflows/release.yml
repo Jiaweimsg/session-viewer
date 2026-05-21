@@ -22,6 +22,8 @@ jobs:
             args: '--target x86_64-apple-darwin'
           - platform: ubuntu-22.04
             args: ''
+          - platform: ubuntu-22.04-arm
+            args: ''
 
     runs-on: ${{ matrix.platform }}
 
@@ -29,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies (Ubuntu)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu-')
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -70,7 +72,8 @@ jobs:
             | Windows | `.msi` / `.exe` (NSIS) | `*-portable.zip` |
             | macOS (Apple Silicon) | `.dmg` | — |
             | macOS (Intel) | `.dmg` | — |
-            | Linux | `.deb` / `.AppImage` | — |
+            | Linux x86_64 | `.deb` / `.AppImage` | — |
+            | Linux ARM64 | `.deb` / `.AppImage` | — |
 
             > Windows 便携版解压即用，无需安装。需要系统已安装 WebView2（Win10/11 默认内置）。
           releaseDraft: false
