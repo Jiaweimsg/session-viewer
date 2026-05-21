@@ -29,6 +29,9 @@ import {
   BarChart3,
 } from "lucide-react";
 import { RankingsTab } from "./RankingsTab";
+import { TierBadgePill } from "./TierBadgePill";
+import * as api from "../../services/tauriApi";
+import type { RankingPayload } from "../../services/tauriApi";
 
 export function StatsPage() {
   const { activeTool, stats, tokenSummary, advancedStats, statsLoading, loadStats } =
@@ -39,6 +42,31 @@ export function StatsPage() {
   // ranking data is piggybacked on /api/report regardless, so switching tabs
   // costs zero extra IPC.
   const [tab, setTab] = useState<"ranking" | "personal">("ranking");
+
+  // Shared ranking state — owned here so the tier pill in the tab bar stays
+  // populated even when the personal tab is active (RankingsTab is
+  // unmounted in that case). One polling cycle drives both consumers.
+  const [ranking, setRanking] = useState<RankingPayload | null>(null);
+  const [rankingLoading, setRankingLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchOnce = async () => {
+      try {
+        const rk = await api.getLatestRanking();
+        if (!cancelled) setRanking(rk);
+      } catch (e) {
+        console.error("[StatsPage] ranking fetch failed:", e);
+      } finally {
+        if (!cancelled) setRankingLoading(false);
+      }
+    };
+    fetchOnce();
+    const id = setInterval(fetchOnce, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     loadStats();
@@ -55,9 +83,9 @@ export function StatsPage() {
 
   return (
     <div>
-      <StatsTabBar tab={tab} onChange={setTab} />
+      <StatsTabBar tab={tab} onChange={setTab} tier={ranking?.your_tier ?? null} />
       {tab === "ranking" ? (
-        <RankingsTab />
+        <RankingsTab data={ranking} loading={rankingLoading} />
       ) : (
         <PersonalStatsContent
           activeTool={activeTool}
@@ -73,34 +101,43 @@ export function StatsPage() {
 function StatsTabBar({
   tab,
   onChange,
+  tier,
 }: {
   tab: "ranking" | "personal";
   onChange: (t: "ranking" | "personal") => void;
+  tier: import("../../services/tauriApi").TierInfo | null;
 }) {
   const baseCls =
     "inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors";
   const activeCls = "border-primary text-foreground";
   const idleCls = "border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/30";
   return (
-    <div className="flex items-center border-b border-border px-6 pt-4" role="tablist">
-      <button
-        role="tab"
-        aria-selected={tab === "ranking"}
-        onClick={() => onChange("ranking")}
-        className={`${baseCls} ${tab === "ranking" ? activeCls : idleCls}`}
-      >
-        <Trophy className="w-4 h-4" />
-        排名统计
-      </button>
-      <button
-        role="tab"
-        aria-selected={tab === "personal"}
-        onClick={() => onChange("personal")}
-        className={`${baseCls} ${tab === "personal" ? activeCls : idleCls}`}
-      >
-        <BarChart3 className="w-4 h-4" />
-        个人统计
-      </button>
+    <div className="flex items-center justify-between border-b border-border px-6 pt-4" role="tablist">
+      <div className="flex items-center">
+        <button
+          role="tab"
+          aria-selected={tab === "ranking"}
+          onClick={() => onChange("ranking")}
+          className={`${baseCls} ${tab === "ranking" ? activeCls : idleCls}`}
+        >
+          <Trophy className="w-4 h-4" />
+          排名统计
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "personal"}
+          onClick={() => onChange("personal")}
+          className={`${baseCls} ${tab === "personal" ? activeCls : idleCls}`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          个人统计
+        </button>
+      </div>
+      {tier && (
+        <div className="pb-2">
+          <TierBadgePill tier={tier} />
+        </div>
+      )}
     </div>
   );
 }

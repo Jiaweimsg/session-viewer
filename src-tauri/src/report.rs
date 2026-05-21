@@ -69,6 +69,17 @@ pub struct RankingPayload {
     #[serde(default)]
     pub your_chaser_name: Option<String>,
     pub total_ranked: u32,
+    /// Reporter's current-month estimated spend in USD. Drives the tier
+    /// badge — kept separate from `your_cost` (which is today). Servers
+    /// before player-tier rollout omit this; serde default keeps old
+    /// payloads valid.
+    #[serde(default)]
+    pub your_month_cost: Option<f64>,
+    /// Player tier (王者荣耀-style ladder) computed from your_month_cost.
+    /// None on servers that haven't shipped the feature yet — UI just hides
+    /// the badge in that case.
+    #[serde(default)]
+    pub your_tier: Option<TierInfo>,
     /// Full today-snapshot: user/region/org sub-boards. Servers <= 0.4.5
     /// omit this — the legacy top-level fields above still carry the daily
     /// individual ranking. Added in server 0.4.6.
@@ -79,6 +90,36 @@ pub struct RankingPayload {
     /// Added in server 0.4.6.
     #[serde(default)]
     pub month: Option<WindowSnapshot>,
+}
+
+/// Player tier on the ladder. Mirrors `rank-tier.ts::TierInfo` on the server
+/// — see that file for the threshold table. We re-derive nothing on the
+/// client; the server is the single source of truth so future ladder tuning
+/// is a server-only deploy.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TierInfo {
+    /// Stable ID like "diamond-3" — useful for UI's per-tier styling.
+    pub key: String,
+    /// 大段位 name, e.g. "永恒钻石".
+    pub label: String,
+    /// 小段位 roman ("III"), or None for 王者档 (no sub-levels).
+    pub sub: Option<String>,
+    /// Color token: "bronze" | "silver" | "gold" | "platinum" | "diamond" |
+    /// "starshine" | "king" | "legend". UI maps to CSS classes.
+    pub color: String,
+    pub emoji: String,
+    /// Echoed current-month cost (USD) for convenience.
+    pub current_cost: f64,
+    /// Inclusive lower bound of this tier.
+    pub current_threshold: f64,
+    /// Label of the next tier, None at the top.
+    pub next_label: Option<String>,
+    /// Inclusive lower bound of the next tier, None at the top.
+    pub next_threshold: Option<f64>,
+    /// 0..100, progress within current tier. 100 at the top.
+    pub progress_pct: f64,
+    /// USD still needed to promote. None at the top.
+    pub cost_to_next: Option<f64>,
 }
 
 /// One time-window snapshot: individual + region + org leaderboards.

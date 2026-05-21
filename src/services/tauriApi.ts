@@ -91,6 +91,13 @@ export interface RankingPayload {
   /** Display name of the chaser, same priority as your_next_name. */
   your_chaser_name: string | null;
   total_ranked: number;
+  /** Reporter's current-month estimated spend in USD — drives the tier
+   *  badge. Kept distinct from `your_cost` (today's spend). Servers before
+   *  player-tier rollout omit this. */
+  your_month_cost?: number | null;
+  /** Player tier (王者荣耀-style ladder) — see TierInfo. Null on servers
+   *  that haven't shipped the feature yet; UI hides the badge. */
+  your_tier?: TierInfo | null;
   /** Full today-snapshot: user/region/org sub-boards. Null on servers
    *  ≤ 0.4.5 — the legacy top-level fields above still cover the daily
    *  individual ranking. Added in server 0.4.6. */
@@ -99,6 +106,33 @@ export interface RankingPayload {
    *  `org.your_team_members` is intentionally omitted in the month
    *  snapshot (today only). */
   month?: WindowSnapshot | null;
+}
+
+/** Player tier on the ladder. Server (`rank-tier.ts`) is the single source
+ *  of truth — client treats this as a flat display payload, no re-derivation. */
+export interface TierInfo {
+  /** Stable ID like "diamond-3". Drives per-tier styling on the client. */
+  key: string;
+  /** Big-tier name, e.g. "永恒钻石". */
+  label: string;
+  /** Roman sub-level ("III"), or null for 王者档 (no sub-levels). */
+  sub: string | null;
+  /** Color token: "bronze" | "silver" | "gold" | "platinum" | "diamond" |
+   *  "starshine" | "king" | "legend". UI maps to CSS classes. */
+  color: string;
+  emoji: string;
+  /** Echoed current-month cost (USD). */
+  current_cost: number;
+  /** Inclusive lower bound of this tier. */
+  current_threshold: number;
+  /** Label of the next tier, null at the top. */
+  next_label: string | null;
+  /** Inclusive lower bound of the next tier, null at the top. */
+  next_threshold: number | null;
+  /** 0..100, progress within current tier. 100 at the top. */
+  progress_pct: number;
+  /** USD still needed to promote. null at the top. */
+  cost_to_next: number | null;
 }
 
 /** One time-window snapshot: individual + region + org leaderboards. */

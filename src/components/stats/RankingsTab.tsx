@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Loader2, ChevronDown, ChevronUp, MapPin, Users } from "lucide-react";
-import * as api from "../../services/tauriApi";
 import type {
   RankingPayload,
   GroupRankSlice,
@@ -12,36 +11,20 @@ import { Podium } from "./Podium";
 /** Rankings tab — individual + region + organization leaderboards, with a
  *  today/month toggle shared by all three. Data is piggybacked on the
  *  /api/report upload cycle (client is anonymous, can't call /api/stats/*
- *  directly); we read the latest snapshot from the Tauri-side state via
- *  `getLatestRanking`. Auto-refresh every 30s mirrors Podium's old behavior.
+ *  directly); StatsPage owns the polling (so the tier pill in the tab bar
+ *  stays populated when this tab is unmounted), we just consume the prop.
  *
  *  Falls back to a friendly "等待首次上报" hint when the server is on a
  *  pre-0.4.6 build (no today/month snapshot) — the user can still see the
  *  legacy daily podium via the bare Podium component on personal tabs. */
-export function RankingsTab() {
-  const [data, setData] = useState<RankingPayload | null>(null);
-  const [loading, setLoading] = useState(true);
+export function RankingsTab({
+  data,
+  loading,
+}: {
+  data: RankingPayload | null;
+  loading: boolean;
+}) {
   const [window, setWindow] = useState<"today" | "month">("today");
-
-  useEffect(() => {
-    let cancelled = false;
-    const fetchOnce = async () => {
-      try {
-        const rk = await api.getLatestRanking();
-        if (!cancelled) setData(rk);
-      } catch (e) {
-        console.error("[RankingsTab] fetch failed:", e);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    fetchOnce();
-    const id = setInterval(fetchOnce, 30_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
 
   if (loading) {
     return (

@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.29] - 2026-05-21
+
+### Added
+
+#### 个人段位系统(王者荣耀风格)
+- Stats 页"排名统计"tab 的标题栏右侧新增个人段位徽章 pill,徽章基于**本月累计消费 $** 计算,与王者赛季制一致 —— 每月 1 号 0 点(Asia/Shanghai)自动重置,所有人从倔强青铜重新起跑
+- 13 大段位(青铜 → 白银 → 黄金 → 铂金 → 钻石 → 星耀 → 王者档 7 级),前 6 个大段位再细分小段位(III/II/I 或 V/IV/III/II/I),共 32 档。阈值参考真实用户消费分布:中位用户落在黄金/铂金,顶尖用户在星耀/王者,传奇王者门槛 $15k 留给未来
+- 徽章 UI 全 CSS 自绘:每个大段位独特配色 + 径向渐变金属勋章 + emoji + 顶部光晕高光;王者档徽章带 `animate-pulse` 微光晕。无图片资源依赖、暗色/亮色模式自适配
+- pill 紧凑横版:emoji 勋章 + 段位名 + 小段位 + 「离 XXX 还差 $X.XX」 + 本月消费,所有信息在一行胶囊里,不挤占 podium 视觉
+- StatsPage 顶层 30s 单次 polling 同时驱动 tab 栏徽章 + RankingsTab podium,切换"今日/本月"或"排名/个人"tab 都不重复发 IPC
+
+#### 服务端关联改动(部署在 0.5.0 镜像)
+- `POST /api/report` 响应顶层新增 `your_month_cost: number` + `your_tier: TierInfo`,TierInfo 含 `{ key, label, sub, color, emoji, current_cost, current_threshold, next_label, next_threshold, progress_pct, cost_to_next }`
+- 段位计算逻辑在新文件 `src/rank-tier.ts`,8 个单元测试覆盖边界值/中段/顶段/progress_pct
+- 既有 `routes.ranking.test.ts` 加 tier 字段断言;`npm test` 81/81 全绿
+
+### 兼容性
+
+- Rust `RankingPayload` 新字段全部 `#[serde(default)]`,**老服务端 + 新客户端**响应里没有 tier 时徽章隐藏,布局正常
+- **新服务端 + 老客户端**:多出来的两个字段被 serde 静默忽略,行为完全一致
+- 两端可独立发版,不需要协调
+
 ## [0.5.27] - 2026-05-20
 
 ### Added
