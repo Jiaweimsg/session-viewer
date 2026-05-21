@@ -69,6 +69,12 @@ export interface RankingEntry {
   total_tokens: number;
   estimated_cost: number;
   message_count?: number | null;
+  /** Player tier (王者赛季制) — computed server-side from this user's
+   *  CURRENT-MONTH cost, not `estimated_cost` above (which is the per-window
+   *  figure). So today's gold/silver/bronze cards show each podium user's
+   *  season-level tier, independent of the today/month toggle. Servers
+   *  before 0.5.30 omit this; UI hides the badge when null. */
+  tier?: TierInfo | null;
 }
 
 export interface RankingPayload {

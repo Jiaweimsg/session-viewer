@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Trophy, Loader2 } from "lucide-react";
 import * as api from "../../services/tauriApi";
-import type { RankingPayload, UserRankSlice } from "../../services/tauriApi";
+import type { RankingPayload, UserRankSlice, TierInfo } from "../../services/tauriApi";
+import { COLOR_PALETTE } from "./tierPalette";
 
 /** Daily gold/silver/bronze podium for the whole team — same data the
  *  dashboard shows, but piggybacked on the local report-usage cycle so we
@@ -239,13 +240,14 @@ function PodiumCard({
       title={`${style.label} · #${entry.rank}`}
     >
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.bar}`} />
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
         <span className={entry.medal === "gold" ? "text-3xl" : "text-2xl"}>
           {style.emoji}
         </span>
         <span className="text-[11px] font-semibold tracking-wider uppercase text-muted-foreground">
           {style.label} · #{entry.rank}
         </span>
+        {entry.tier && <MiniTierChip tier={entry.tier} />}
       </div>
       <div className={`font-semibold leading-tight break-words ${entry.medal === "gold" ? "text-lg" : "text-base"}`}>
         {displayName}
@@ -274,6 +276,25 @@ function PodiumCard({
 function formatCost(usd: number): string {
   if (usd >= 1) return `$${usd.toFixed(2)}`;
   return `$${usd.toFixed(4)}`;
+}
+
+/** Tiny tier badge piggybacked on each podium card's header row. Reuses the
+ *  same color palette as the full TierBadgePill in the StatsPage header so
+ *  bronze-V looks like bronze regardless of where it appears. Tier is the
+ *  user's CURRENT-MONTH tier — that's why we can show a 至尊星耀 on the
+ *  daily podium even if today's spend is small. */
+function MiniTierChip({ tier }: { tier: TierInfo }) {
+  const palette = COLOR_PALETTE[tier.color] ?? COLOR_PALETTE.bronze;
+  return (
+    <span
+      className={`ml-auto inline-flex items-center gap-1 rounded-full border ${palette.cardBorder} ${palette.cardBg} px-2 py-0.5 text-[10px] font-semibold ${palette.headingText}`}
+      title={`段位:${tier.label}${tier.sub ? " " + tier.sub : ""} · 本月 $${tier.current_cost.toFixed(2)}`}
+    >
+      <span className="text-xs leading-none">{tier.emoji}</span>
+      <span className="whitespace-nowrap">{tier.label}</span>
+      {tier.sub && <span className={`${palette.subText} font-medium`}>{tier.sub}</span>}
+    </span>
+  );
 }
 
 function formatTokens(n: number): string {

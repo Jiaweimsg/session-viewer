@@ -194,6 +194,14 @@ pub struct RankingEntry {
     pub total_tokens: u64,
     pub estimated_cost: f64,
     pub message_count: Option<u64>,
+    /// Player tier (王者赛季制) for this user. Server computes it from the
+    /// user's CURRENT-MONTH cost — not `estimated_cost` above (which is the
+    /// per-window figure, e.g. "today" on the daily board). So a user
+    /// appearing on the daily top3 still shows their season-level tier.
+    /// Servers before 0.5.30 omit this; serde default keeps old payloads
+    /// valid and the UI just hides the badge.
+    #[serde(default)]
+    pub tier: Option<TierInfo>,
 }
 
 /// Read a value from global git config; empty/missing → None.

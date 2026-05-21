@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.30] - 2026-05-21
+
+### Added
+
+#### Stats 页 podium 三张卡片各自显示段位徽章
+- 现象:0.5.29 上线了「个人段位 pill」,但只显示**本机用户自己**的段位 —— 看不到冠/亚/季军在赛季阶梯上的位置。打开「今日排行」时一眼能看到金额排名,却完全感知不到「冠军杨佳佳是无双王者还是黄金 II」这种维度
+- 在 PodiumCard 的「冠军 · #1 / 亚军 · #2 / 季军 · #3」标签那行右侧追加一枚迷你段位 chip(emoji + 大段位 + 小段位,例如 `⭐至尊星耀 IV` / `👑无双王者`),复用 TierBadgePill 的调色板,8 个大段位每个独有配色;悬停 title 显示「段位 + 本月 $X.XX」
+- **关键语义**:段位永远基于该用户的**本月累计消费**算,无论 podium 处于「今日」还是「本月」tab。所以一个今日只花了 $200、但本月已累计 $7000 的冠军,徽章正确显示无双王者,而不是按今日金额误判到铂金
+- 调色板 `COLOR_PALETTE` + `Palette` 接口从 `TierBadgePill.tsx` 抽到共享文件 `src/components/stats/tierPalette.ts`,Podium mini chip 和 TierBadgePill pill 共用一份,后续段位视觉调整只需要改一个地方
+- 卡片头部行从 `flex` 改为 `flex-wrap`,窄屏(单列)时 chip 会优雅换行到下一行而不撑破卡片
+
+#### 服务端关联改动(同步发版下一镜像)
+- `pickUserSlice()` 新增第 3 个参数 `monthCostByEmail: Map<string, number>`,top3 每个 entry 注入 `tier: TierInfo`,数据来自 `monthUserBoard` 预派生的 O(1) lookup map
+- `buildRankingPayload()` 给 `today.user` + `month.user`(+ 顶层 legacy top3)的 top3 都填上 tier;**region/org 的 top3 不动**,组聚合 entry 没有「个人本月 cost」语义
+- `routes.ranking.test.ts` 新增 tier 字段断言:每个 top3 entry 必带 tier 结构;Bob 在 today 榜上看到的 tier.key 必须等于他在 month 榜上看到的 tier.key(跨窗口稳定);Bob 月累计 $8k+ 段位高于 Alice 月累计 $1.5,echo cost 单调
+- `npm test` 81/81 全绿
+
+### 兼容性
+
+- Rust `RankingEntry.tier` 字段 `#[serde(default)]`,**老服务端 + 新客户端**响应里没有 tier 时 chip 静默不渲染,卡片其它部分行为完全一致
+- **新服务端 + 老客户端**:多出来的 tier 字段被 serde 静默忽略,行为零变化
+- 两端可独立发版,沿用 0.5.26 / 0.5.27 / 0.5.29 的模式
+
 ## [0.5.29] - 2026-05-21
 
 ### Added
