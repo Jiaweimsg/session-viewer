@@ -91,6 +91,59 @@ export interface RankingPayload {
   /** Display name of the chaser, same priority as your_next_name. */
   your_chaser_name: string | null;
   total_ranked: number;
+  /** Full today-snapshot: user/region/org sub-boards. Null on servers
+   *  ≤ 0.4.5 — the legacy top-level fields above still cover the daily
+   *  individual ranking. Added in server 0.4.6. */
+  today?: WindowSnapshot | null;
+  /** Full month-snapshot (current YYYY-MM). user/region/org sub-boards.
+   *  `org.your_team_members` is intentionally omitted in the month
+   *  snapshot (today only). */
+  month?: WindowSnapshot | null;
+}
+
+/** One time-window snapshot: individual + region + org leaderboards. */
+export interface WindowSnapshot {
+  /** "YYYY-MM-DD" for today, "YYYY-MM" for month. Wire field is `date` or
+   *  `month` — Rust side aliases month → date, so client always reads `date`. */
+  date: string;
+  user: UserRankSlice;
+  region: GroupRankSlice;
+  org: GroupRankSlice;
+}
+
+export interface UserRankSlice {
+  top3: RankingEntry[];
+  your_rank: number | null;
+  your_cost: number;
+  your_next_cost: number | null;
+  your_next_name: string | null;
+  your_chaser_cost: number | null;
+  your_chaser_name: string | null;
+  total_ranked: number;
+}
+
+export interface GroupRankSlice {
+  /** "未分类" if the reporter hasn't filled the field on the dashboard. */
+  your_group: string;
+  your_rank: number | null;
+  your_cost: number;
+  total_ranked: number;
+  top3: GroupRankEntry[];
+  /** Only populated for `today.org` — the reporter's own team's individual
+   *  leaderboard, capped at 30. Always missing for region buckets and for
+   *  the month snapshot. */
+  your_team_members?: RankingEntry[] | null;
+}
+
+export interface GroupRankEntry {
+  rank: number;
+  medal: "gold" | "silver" | "bronze" | null;
+  /** Bucket name — region (e.g. "北京") or organization (e.g. "基础服务组"). */
+  grp: string;
+  estimated_cost: number;
+  total_tokens: number;
+  user_count?: number | null;
+  message_count?: number | null;
 }
 
 /** Latest daily leaderboard piggybacked on /api/report responses. Null until

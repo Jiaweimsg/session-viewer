@@ -69,6 +69,76 @@ pub struct RankingPayload {
     #[serde(default)]
     pub your_chaser_name: Option<String>,
     pub total_ranked: u32,
+    /// Full today-snapshot: user/region/org sub-boards. Servers <= 0.4.5
+    /// omit this — the legacy top-level fields above still carry the daily
+    /// individual ranking. Added in server 0.4.6.
+    #[serde(default)]
+    pub today: Option<WindowSnapshot>,
+    /// Full month-snapshot (current YYYY-MM). user/region/org sub-boards.
+    /// org sub-board does NOT carry your_team_members in the month snapshot.
+    /// Added in server 0.4.6.
+    #[serde(default)]
+    pub month: Option<WindowSnapshot>,
+}
+
+/// One time-window snapshot: individual + region + org leaderboards.
+/// Used twice in RankingPayload — once for today, once for the current month.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WindowSnapshot {
+    /// "YYYY-MM-DD" for today, "YYYY-MM" for month. Serialized either as `date`
+    /// or `month` on the wire — we accept both with serde aliases.
+    #[serde(default, alias = "month")]
+    pub date: Option<String>,
+    pub user: UserRankSlice,
+    pub region: GroupRankSlice,
+    pub org: GroupRankSlice,
+}
+
+/// Reporter's placement on the individual leaderboard for one time window.
+/// Mirrors the legacy top-level fields exactly (top3, your_rank, ...).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UserRankSlice {
+    pub top3: Vec<RankingEntry>,
+    pub your_rank: Option<u32>,
+    pub your_cost: f64,
+    #[serde(default)]
+    pub your_next_cost: Option<f64>,
+    #[serde(default)]
+    pub your_next_name: Option<String>,
+    #[serde(default)]
+    pub your_chaser_cost: Option<f64>,
+    #[serde(default)]
+    pub your_chaser_name: Option<String>,
+    pub total_ranked: u32,
+}
+
+/// One bucket-level leaderboard (region buckets or organization buckets).
+/// `your_group` is "未分类" when the reporter hasn't filled the field.
+/// `your_team_members` is only populated for `today.org` — the reporter's
+/// own team's individual leaderboard, capped at 30.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GroupRankSlice {
+    pub your_group: String,
+    pub your_rank: Option<u32>,
+    pub your_cost: f64,
+    pub total_ranked: u32,
+    pub top3: Vec<GroupRankEntry>,
+    #[serde(default)]
+    pub your_team_members: Option<Vec<RankingEntry>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GroupRankEntry {
+    pub rank: u32,
+    pub medal: Option<String>,
+    /// Bucket name — region label (e.g. "北京") or organization label (e.g. "基础服务组").
+    pub grp: String,
+    pub estimated_cost: f64,
+    pub total_tokens: u64,
+    #[serde(default)]
+    pub user_count: Option<u32>,
+    #[serde(default)]
+    pub message_count: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

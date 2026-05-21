@@ -25,12 +25,20 @@ import {
   Wrench,
   TrendingUp,
   AlertTriangle,
+  Trophy,
+  BarChart3,
 } from "lucide-react";
-import { Podium } from "./Podium";
+import { RankingsTab } from "./RankingsTab";
 
 export function StatsPage() {
   const { activeTool, stats, tokenSummary, advancedStats, statsLoading, loadStats } =
     useAppStore();
+
+  // Two-tab layout (added 2026-05): rankings live on their own tab so the
+  // personal-stats scroll area is no longer interrupted by the podium. The
+  // ranking data is piggybacked on /api/report regardless, so switching tabs
+  // costs zero extra IPC.
+  const [tab, setTab] = useState<"ranking" | "personal">("ranking");
 
   useEffect(() => {
     loadStats();
@@ -45,48 +53,84 @@ export function StatsPage() {
     );
   }
 
-  if (!stats && !tokenSummary) {
-    return (
-      <div className="p-6 text-muted-foreground">
-        <Podium />
-        未找到统计数据。
-      </div>
-    );
-  }
-
-  if (activeTool === "codex" || activeTool === "opencode") {
-    return (
-      <div>
-        <div className="px-6 pt-6">
-          <Podium />
-        </div>
-        <CodexStats stats={stats as CodexTokenSummary} />
-      </div>
-    );
-  }
-
-  if (activeTool === "cursor" || activeTool === "copilot" || activeTool === "cursor-cli") {
-    return (
-      <div>
-        <div className="px-6 pt-6">
-          <Podium />
-        </div>
-        <CursorStatsView stats={stats as CursorStatsType} />
-      </div>
-    );
-  }
-
   return (
     <div>
-      <div className="px-6 pt-6">
-        <Podium />
-      </div>
-      <ClaudeStats
-        stats={stats as StatsCache}
-        tokenSummary={tokenSummary as ClaudeTokenSummary | null}
-        advancedStats={advancedStats as AdvancedStats | null}
-      />
+      <StatsTabBar tab={tab} onChange={setTab} />
+      {tab === "ranking" ? (
+        <RankingsTab />
+      ) : (
+        <PersonalStatsContent
+          activeTool={activeTool}
+          stats={stats}
+          tokenSummary={tokenSummary}
+          advancedStats={advancedStats}
+        />
+      )}
     </div>
+  );
+}
+
+function StatsTabBar({
+  tab,
+  onChange,
+}: {
+  tab: "ranking" | "personal";
+  onChange: (t: "ranking" | "personal") => void;
+}) {
+  const baseCls =
+    "inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors";
+  const activeCls = "border-primary text-foreground";
+  const idleCls = "border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/30";
+  return (
+    <div className="flex items-center border-b border-border px-6 pt-4" role="tablist">
+      <button
+        role="tab"
+        aria-selected={tab === "ranking"}
+        onClick={() => onChange("ranking")}
+        className={`${baseCls} ${tab === "ranking" ? activeCls : idleCls}`}
+      >
+        <Trophy className="w-4 h-4" />
+        排名统计
+      </button>
+      <button
+        role="tab"
+        aria-selected={tab === "personal"}
+        onClick={() => onChange("personal")}
+        className={`${baseCls} ${tab === "personal" ? activeCls : idleCls}`}
+      >
+        <BarChart3 className="w-4 h-4" />
+        个人统计
+      </button>
+    </div>
+  );
+}
+
+function PersonalStatsContent({
+  activeTool,
+  stats,
+  tokenSummary,
+  advancedStats,
+}: {
+  activeTool: string;
+  stats: any;
+  tokenSummary: any;
+  advancedStats: any;
+}) {
+  if (!stats && !tokenSummary) {
+    return <div className="p-6 text-muted-foreground">未找到统计数据。</div>;
+  }
+  if (activeTool === "codex" || activeTool === "opencode") {
+    return <CodexStats stats={stats as CodexTokenSummary} />;
+  }
+  if (activeTool === "cursor" || activeTool === "copilot" || activeTool === "cursor-cli") {
+    return <CursorStatsView stats={stats as CursorStatsType} />;
+  }
+  return (
+    <ClaudeStats
+      stats={stats as StatsCache}
+      tokenSummary={tokenSummary as ClaudeTokenSummary | null}
+      advancedStats={advancedStats as AdvancedStats | null}
+    />
   );
 }
 
