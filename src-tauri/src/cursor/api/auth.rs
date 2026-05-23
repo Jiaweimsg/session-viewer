@@ -71,12 +71,8 @@ fn read_user_id_from_cli_config() -> Result<String, String> {
         .auth_info
         .and_then(|a| a.auth_id)
         .ok_or_else(|| "authInfo.authId missing".to_string())?;
-    // auth0|user_XXX → user_XXX
-    let user = auth_id
-        .split('|')
-        .find(|s| s.starts_with("user_"))
-        .ok_or_else(|| "no user_* segment in authId".to_string())?;
-    Ok(user.to_string())
+    normalize_cursor_subject(&auth_id)
+        .ok_or_else(|| format!("unparseable cli-config authId: {:?}", auth_id))
 }
 
 fn user_id_from_jwt(jwt: &str) -> Result<String, String> {
@@ -93,28 +89,106 @@ fn user_id_from_jwt(jwt: &str) -> Result<String, String> {
         .get("sub")
         .and_then(|s| s.as_str())
         .ok_or_else(|| "jwt.sub missing".to_string())?;
-    // Cursor 历史上 sub 格式见过几种:
-    //   "auth0|user_XXX"          Auth0 早期
-    //   "google-oauth2|user_XXX"  Auth0 + 第三方 IdP
-    //   "user_XXX"                WorkOS 直接以 user_ 开头,无 provider 前缀
-    //   其它未知前缀(2026 起)    仅有 `|` 分段但段名不是 user_
-    // 解析策略(降级):
-    //   1) split('|') 找 user_* 段 → 命中前两种
-    //   2) sub 整体不含 '|' → 整体即标识 → 命中 WorkOS 形态
-    //   3) 取最后一段做兜底 → 未知前缀
-    //   4) 全失败时把 sub 整段塞进错误信息,方便下一发对症
-    if let Some(seg) = sub.split('|').find(|s| s.starts_with("user_")) {
-        return Ok(seg.to_string());
+    normalize_cursor_subject(sub).ok_or_else(|| format!("unparseable jwt.sub: {:?}", sub))
+}
+
+/// Map a Cursor "subject" (from JWT.sub 或 cli-config.json authId) 到 cookie
+/// 里要用的 user identifier。规则参考 mm7894215/TokenTracker —— Cursor 实际
+/// 在用 WorkOS bridge,sub 形态分两类:
+///
+/// 1. **Native account** (Cursor 邮箱密码注册): `auth0|user_XXXXX`
+///    → cookie 里需要 *剥掉* provider 前缀,只用 `user_XXXXX`
+/// 2. **OAuth via WorkOS** (Google / GitHub / 通用 OIDC): `google-oauth2|123`,
+///    `github|45678`, `oidc|...`, 或者罕见的 `auth0|<非 user_ id>`
+///    → cookie 里需要 **整段保留** `<provider>|<id>`
+/// 3. **直接 user_XXX(无 provider 段)**: WorkOS 未来格式预留
+///    → 整段保留
+///
+/// 之前的实现只识别 #1,Google 登录的客户卡在 "no user_* in jwt.sub",再之前
+/// 的"取最后一段"兜底又会把 #2 错拼成只剩 ID 部分,cursor.com API 返回 401。
+const WORKOS_OAUTH_PROVIDERS: &[&str] = &["google-oauth2", "github", "oidc", "auth0"];
+
+fn normalize_cursor_subject(subject: &str) -> Option<String> {
+    let s = subject.trim();
+    if s.is_empty() {
+        return None;
     }
-    if !sub.contains('|') {
-        if sub.is_empty() {
-            return Err("jwt.sub empty".to_string());
+    // Case 1: native — "<provider>|user_XXX" → "user_XXX"
+    if let Some(idx) = s.rfind('|') {
+        let last = &s[idx + 1..];
+        if last.starts_with("user_")
+            && last.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Some(last.to_string());
         }
-        return Ok(sub.to_string());
+        // Case 2: WorkOS OAuth — keep "<provider>|<id>" verbatim
+        let provider = &s[..idx];
+        let id_part = &s[idx + 1..];
+        if WORKOS_OAUTH_PROVIDERS.contains(&provider)
+            && !id_part.is_empty()
+            && !id_part.contains('|')
+        {
+            return Some(s.to_string());
+        }
+        return None;
     }
-    let last = sub.rsplit('|').next().unwrap_or("");
-    if !last.is_empty() {
-        return Ok(last.to_string());
+    // Case 3: no '|' — bare "user_XXX"
+    if s.starts_with("user_") && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Some(s.to_string());
     }
-    Err(format!("unparseable jwt.sub: {:?}", sub))
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_native_strips_provider() {
+        assert_eq!(
+            normalize_cursor_subject("auth0|user_01HXXX"),
+            Some("user_01HXXX".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_google_keeps_full_subject() {
+        assert_eq!(
+            normalize_cursor_subject("google-oauth2|112233445566"),
+            Some("google-oauth2|112233445566".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_github_keeps_full_subject() {
+        assert_eq!(
+            normalize_cursor_subject("github|12345"),
+            Some("github|12345".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_bare_user_id() {
+        assert_eq!(
+            normalize_cursor_subject("user_01HXXX"),
+            Some("user_01HXXX".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_email_or_plain_id() {
+        assert_eq!(normalize_cursor_subject("alice@example.com"), None);
+        assert_eq!(normalize_cursor_subject("12345"), None);
+    }
+
+    #[test]
+    fn normalize_rejects_unknown_provider() {
+        assert_eq!(normalize_cursor_subject("twitter|123"), None);
+    }
+
+    #[test]
+    fn normalize_rejects_empty_and_whitespace() {
+        assert_eq!(normalize_cursor_subject(""), None);
+        assert_eq!(normalize_cursor_subject("   "), None);
+    }
 }
