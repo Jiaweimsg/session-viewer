@@ -817,6 +817,15 @@ function CursorStatsView({ stats }: { stats: CursorStatsType }) {
             <div className="text-xs leading-relaxed mt-1 opacity-80">
               会话数 / 消息数 / 项目分布等本地维度仍正常展示。
             </div>
+            {stats.authError && (
+              <div
+                className="text-[11px] leading-relaxed mt-2 font-mono opacity-60 break-all cursor-pointer hover:opacity-90"
+                title="点击复制诊断"
+                onClick={() => navigator.clipboard?.writeText(stats.authError || "")}
+              >
+                诊断: {stats.authError}
+              </div>
+            )}
           </div>
         </div>
       )}

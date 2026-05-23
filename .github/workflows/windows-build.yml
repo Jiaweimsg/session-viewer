@@ -1,0 +1,67 @@
+name: Windows Build (manual)
+
+# Standalone manual build for Windows x86_64 — does NOT create a GitHub
+# Release, does NOT push a tag. Triggered via `gh workflow run windows-build`
+# or the Actions tab. Produces MSI / NSIS .exe / portable .zip as a
+# downloadable artifact retained for 30 days.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # tauri-action without tagName → just runs `tauri build`, never touches
+      # the GitHub Release API. Bundles land under src-tauri/target/release/bundle/.
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create portable zip
+        shell: pwsh
+        run: |
+          $exePath = "src-tauri/target/release/session-viewer.exe"
+          if (Test-Path $exePath) {
+            $zipName = "session-viewer-windows-portable.zip"
+            Compress-Archive -Path $exePath -DestinationPath $zipName -Force
+            Write-Output "Created $zipName"
+          } else {
+            Write-Error "session-viewer.exe not found at $exePath"
+            exit 1
+          }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-viewer-windows-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+            session-viewer-windows-portable.zip
+          retention-days: 30
+          if-no-files-found: error
