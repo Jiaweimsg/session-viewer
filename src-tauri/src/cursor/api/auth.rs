@@ -93,8 +93,28 @@ fn user_id_from_jwt(jwt: &str) -> Result<String, String> {
         .get("sub")
         .and_then(|s| s.as_str())
         .ok_or_else(|| "jwt.sub missing".to_string())?;
-    sub.split('|')
-        .find(|s| s.starts_with("user_"))
-        .map(|s| s.to_string())
-        .ok_or_else(|| "no user_* in jwt.sub".to_string())
+    // Cursor 历史上 sub 格式见过几种:
+    //   "auth0|user_XXX"          Auth0 早期
+    //   "google-oauth2|user_XXX"  Auth0 + 第三方 IdP
+    //   "user_XXX"                WorkOS 直接以 user_ 开头,无 provider 前缀
+    //   其它未知前缀(2026 起)    仅有 `|` 分段但段名不是 user_
+    // 解析策略(降级):
+    //   1) split('|') 找 user_* 段 → 命中前两种
+    //   2) sub 整体不含 '|' → 整体即标识 → 命中 WorkOS 形态
+    //   3) 取最后一段做兜底 → 未知前缀
+    //   4) 全失败时把 sub 整段塞进错误信息,方便下一发对症
+    if let Some(seg) = sub.split('|').find(|s| s.starts_with("user_")) {
+        return Ok(seg.to_string());
+    }
+    if !sub.contains('|') {
+        if sub.is_empty() {
+            return Err("jwt.sub empty".to_string());
+        }
+        return Ok(sub.to_string());
+    }
+    let last = sub.rsplit('|').next().unwrap_or("");
+    if !last.is_empty() {
+        return Ok(last.to_string());
+    }
+    Err(format!("unparseable jwt.sub: {:?}", sub))
 }
