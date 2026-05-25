@@ -40,6 +40,31 @@ fn report_server() -> String {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn show_in_dock(app: &tauri::AppHandle) {
+    let _ = app.set_dock_visibility(true);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_in_dock(_app: &tauri::AppHandle) {}
+
+#[cfg(target_os = "macos")]
+fn hide_from_dock(app: &tauri::AppHandle) {
+    let _ = app.set_dock_visibility(false);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_from_dock(_app: &tauri::AppHandle) {}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    show_in_dock(app);
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = w.unminimize();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Windows: 抑制系统级"应用程序无法正常启动"对话框
@@ -83,6 +108,7 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                hide_from_dock(&window.app_handle());
             }
         })
         .setup(|app| {
@@ -120,11 +146,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                            let _ = w.unminimize();
-                        }
+                        show_main_window(app);
                     }
                     "report_now" => {
                         let server = report_server();
@@ -155,11 +177,7 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        if let Some(w) = tray_handle.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                            let _ = w.unminimize();
-                        }
+                        show_main_window(&tray_handle);
                     }
                 })
                 .build(app)?;
@@ -247,11 +265,7 @@ pub fn run() {
             {
                 if let tauri::RunEvent::Reopen { has_visible_windows, .. } = _event {
                     if !has_visible_windows {
-                        if let Some(window) = _app_handle.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = window.unminimize();
-                        }
+                        show_main_window(_app_handle);
                     }
                 }
             }
