@@ -184,16 +184,6 @@ export function SessionsPage() {
                         {session.gitBranch}
                       </span>
                     )}
-                    {activeTool === "codex" && session.modelProvider && (
-                      <span className="px-1.5 py-0.5 bg-green-500/10 text-green-500 rounded text-xs font-medium">
-                        {session.modelProvider}
-                      </span>
-                    )}
-                    {activeTool === "codex" && session.model && (
-                      <span className="text-muted-foreground/60 font-mono">
-                        {session.model}
-                      </span>
-                    )}
                     {activeTool === "copilot" && session.summary && (
                       <span className="text-muted-foreground/80 italic truncate max-w-xs">
                         {session.summary}

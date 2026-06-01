@@ -84,11 +84,6 @@ export function ProjectsPage() {
                           )}
                         </span>
                       )}
-                      {activeTool === "codex" && project.modelProvider && (
-                        <span className="px-1.5 py-0.5 bg-green-500/10 text-green-500 rounded text-xs font-medium">
-                          {project.modelProvider}
-                        </span>
-                      )}
                     </div>
                   </div>
                 </div>
