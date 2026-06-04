@@ -86,8 +86,8 @@ pub struct RankingPayload {
     #[serde(default)]
     pub today: Option<WindowSnapshot>,
     /// Full month-snapshot (current YYYY-MM). user/region/org sub-boards.
-    /// org sub-board does NOT carry your_team_members in the month snapshot.
-    /// Added in server 0.4.6.
+    /// Newer servers also populate org.your_team_members here (servers
+    /// between 0.4.6 and that build omitted it for month). Added in 0.4.6.
     #[serde(default)]
     pub month: Option<WindowSnapshot>,
 }
@@ -155,8 +155,9 @@ pub struct UserRankSlice {
 
 /// One bucket-level leaderboard (region buckets or organization buckets).
 /// `your_group` is "未分类" when the reporter hasn't filled the field.
-/// `your_team_members` is only populated for `today.org` — the reporter's
-/// own team's individual leaderboard, capped at 30.
+/// `your_team_members` is the reporter's own team's individual leaderboard
+/// (capped at 30) — populated for today.org and, on newer servers, month.org.
+/// Always missing for region buckets.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GroupRankSlice {
     pub your_group: String,

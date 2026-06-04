@@ -109,8 +109,8 @@ export interface RankingPayload {
    *  individual ranking. Added in server 0.4.6. */
   today?: WindowSnapshot | null;
   /** Full month-snapshot (current YYYY-MM). user/region/org sub-boards.
-   *  `org.your_team_members` is intentionally omitted in the month
-   *  snapshot (today only). */
+   *  Servers ≥ this build also populate `org.your_team_members` here
+   *  (servers between 0.4.6 and that build omitted it for month). */
   month?: WindowSnapshot | null;
 }
 
@@ -169,9 +169,10 @@ export interface GroupRankSlice {
   your_cost: number;
   total_ranked: number;
   top3: GroupRankEntry[];
-  /** Only populated for `today.org` — the reporter's own team's individual
-   *  leaderboard, capped at 30. Always missing for region buckets and for
-   *  the month snapshot. */
+  /** Populated for the reporter's own organization slice (today.org and,
+   *  on newer servers, month.org). Caps at 30 entries. Always missing for
+   *  region buckets. Older servers (< the build that added month members)
+   *  omit it for the month snapshot. */
   your_team_members?: RankingEntry[] | null;
 }
 
