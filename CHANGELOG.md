@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.31] - 2026-06-03
+
+### Fixed
+
+#### Claude Code token 统计去重(消除约 2.2× 虚高)
+- 现象:Claude Code 会把一次 API 响应按 content block 拆成多行 JSONL,**每行都盖同一份完整 `usage`**。客户端原先对每条 assistant 行无脑累加,等于把每次请求的 token ×(该请求的 block 数);本机实测高估约 **2.2×**(真实 token 仅占上报的 ~45%)
+- 修复:扫描时按 `(message.id, requestId)` 去重,每个请求只计一次(keep-first);缺这两个字段的行照常计入(无法去重)
+- 覆盖三条路径:上报 `scan_session_for_report`、统计 `scan_session_for_stats` / `scan_session_incremental`(全局去重,兼顾跨文件 resume 复制)、高级统计 `scan_session_advanced`(单文件去重);同时修正了被同样重复拉高的 `message_count` 与工具调用计数
+- 注意:服务端 `usage_records` 按 `(user, tool, date, project, model)` 取 MAX 合并,故**新数据**会变准,历史已入库的虚高值不回退(本次不处理存量)
+
 ## [0.5.30] - 2026-05-21
 
 ### Added

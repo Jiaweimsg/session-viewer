@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -50,6 +50,10 @@ pub fn get_global_stats() -> Result<StatsCache, String> {
 /// Full-scan every *extra* projects dir (all but the default ~/.claude home,
 /// which `base` already covers) and merge its stats into `base`.
 fn fold_extra_dirs(base: &mut StatsCache) {
+    // Global across all extra dirs so copied session files between accounts do
+    // not double-count split content-block usage.
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+
     for projects_dir in get_all_projects_dirs().into_iter().skip(1) {
         if !projects_dir.exists() {
             continue;
@@ -74,6 +78,7 @@ fn fold_extra_dirs(base: &mut StatsCache) {
                     &mut daily_stats,
                     &mut daily_model_tokens,
                     &mut model_usage,
+                    &mut seen,
                 );
             }
         }
@@ -180,6 +185,8 @@ fn merge_incremental(mut base: StatsCache, cutoff_date: String) -> Result<StatsC
     let mut delta_daily: HashMap<String, (u64, u64, u64)> = HashMap::new();
     let mut delta_model_tokens: HashMap<String, HashMap<String, u64>> = HashMap::new();
     let mut delta_model_usage: HashMap<String, ModelUsageEntry> = HashMap::new();
+    // Global dedup of (message.id, requestId) across the incremental scan.
+    let mut seen: HashSet<(String, String)> = HashSet::new();
 
     let entries =
         fs::read_dir(&projects_dir).map_err(|e| format!("Failed to read projects dir: {}", e))?;
@@ -205,6 +212,7 @@ fn merge_incremental(mut base: StatsCache, cutoff_date: String) -> Result<StatsC
                 &mut delta_daily,
                 &mut delta_model_tokens,
                 &mut delta_model_usage,
+                &mut seen,
             );
         }
     }
@@ -283,6 +291,7 @@ fn scan_session_incremental(
     daily_stats: &mut HashMap<String, (u64, u64, u64)>,
     daily_model_tokens: &mut HashMap<String, HashMap<String, u64>>,
     model_usage: &mut HashMap<String, ModelUsageEntry>,
+    seen: &mut HashSet<(String, String)>,
 ) {
     let file = match fs::File::open(path) {
         Ok(f) => f,
@@ -343,6 +352,21 @@ fn scan_session_incremental(
 
         if date.as_str() <= cutoff_date {
             continue;
+        }
+
+        // Skip duplicate content-block lines of one assistant response (same
+        // message.id + requestId) — see scan_session_for_stats.
+        if record_type == "assistant" {
+            if let Some(msg) = v.get("message") {
+                if let (Some(mid), Some(rid)) = (
+                    msg.get("id").and_then(|x| x.as_str()),
+                    v.get("requestId").and_then(|x| x.as_str()),
+                ) {
+                    if !seen.insert((mid.to_string(), rid.to_string())) {
+                        continue;
+                    }
+                }
+            }
         }
 
         *day_messages.entry(date.clone()).or_insert(0) += 1;
@@ -494,6 +518,8 @@ fn compute_stats_from_sessions() -> Result<StatsCache, String> {
     let mut daily_model_tokens: HashMap<String, HashMap<String, u64>> = HashMap::new();
     // model -> ModelUsageEntry
     let mut model_usage: HashMap<String, ModelUsageEntry> = HashMap::new();
+    // Global dedup of (message.id, requestId) — see scan_session_for_stats.
+    let mut seen: HashSet<(String, String)> = HashSet::new();
 
     let entries =
         fs::read_dir(&projects_dir).map_err(|e| format!("Failed to read projects dir: {}", e))?;
@@ -510,6 +536,7 @@ fn compute_stats_from_sessions() -> Result<StatsCache, String> {
                 &mut daily_stats,
                 &mut daily_model_tokens,
                 &mut model_usage,
+                &mut seen,
             );
         }
     }
@@ -550,6 +577,7 @@ fn scan_session_for_stats(
     daily_stats: &mut HashMap<String, (u64, u64, u64)>,
     daily_model_tokens: &mut HashMap<String, HashMap<String, u64>>,
     model_usage: &mut HashMap<String, ModelUsageEntry>,
+    seen: &mut HashSet<(String, String)>,
 ) {
     let file = match fs::File::open(path) {
         Ok(f) => f,
@@ -610,6 +638,22 @@ fn scan_session_for_stats(
 
         if session_date.is_none() {
             session_date = Some(date.clone());
+        }
+
+        // Skip duplicate content-block lines of one assistant response (same
+        // message.id + requestId); Claude Code stamps every block-line with the
+        // same cumulative usage, so without this tokens are summed once per block.
+        if record_type == "assistant" {
+            if let Some(msg) = v.get("message") {
+                if let (Some(mid), Some(rid)) = (
+                    msg.get("id").and_then(|x| x.as_str()),
+                    v.get("requestId").and_then(|x| x.as_str()),
+                ) {
+                    if !seen.insert((mid.to_string(), rid.to_string())) {
+                        continue;
+                    }
+                }
+            }
         }
 
         // Count messages per day
@@ -868,6 +912,10 @@ fn scan_session_advanced(path: &Path) -> SessionScanResult {
         output_tokens: 0,
         tool_calls: HashMap::new(),
     };
+    // Per-file dedup of (message.id, requestId): same-response content-block
+    // lines repeat the cumulative usage, which would otherwise inflate this
+    // session's token/message totals.
+    let mut seen: HashSet<(String, String)> = HashSet::new();
 
     let file = match fs::File::open(path) {
         Ok(f) => f,
@@ -903,6 +951,20 @@ fn scan_session_advanced(path: &Path) -> SessionScanResult {
 
         if record_type != "user" && record_type != "assistant" {
             continue;
+        }
+
+        // Skip duplicate content-block lines of one assistant response.
+        if record_type == "assistant" {
+            if let Some(msg) = v.get("message") {
+                if let (Some(mid), Some(rid)) = (
+                    msg.get("id").and_then(|x| x.as_str()),
+                    v.get("requestId").and_then(|x| x.as_str()),
+                ) {
+                    if !seen.insert((mid.to_string(), rid.to_string())) {
+                        continue;
+                    }
+                }
+            }
         }
 
         result.message_count += 1;
@@ -998,7 +1060,8 @@ mod tests {
         let mut daily: HashMap<String, (u64, u64, u64)> = HashMap::new();
         let mut dmt: HashMap<String, HashMap<String, u64>> = HashMap::new();
         let mut usage: HashMap<String, ModelUsageEntry> = HashMap::new();
-        scan_session_incremental(&file, "2026-05-12", &mut daily, &mut dmt, &mut usage);
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        scan_session_incremental(&file, "2026-05-12", &mut daily, &mut dmt, &mut usage, &mut seen);
 
         let d13 = daily.get("2026-05-13").expect("missing 2026-05-13");
         assert_eq!(d13.0, 2, "2026-05-13 message_count");
@@ -1038,7 +1101,8 @@ mod tests {
         let mut daily: HashMap<String, (u64, u64, u64)> = HashMap::new();
         let mut dmt: HashMap<String, HashMap<String, u64>> = HashMap::new();
         let mut usage: HashMap<String, ModelUsageEntry> = HashMap::new();
-        scan_session_incremental(&file, "2026-05-12", &mut daily, &mut dmt, &mut usage);
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        scan_session_incremental(&file, "2026-05-12", &mut daily, &mut dmt, &mut usage, &mut seen);
 
         assert!(!daily.contains_key("2026-04-30"), "pre-cutoff date leaked");
         assert!(!dmt.contains_key("2026-04-30"), "pre-cutoff tokens leaked");
