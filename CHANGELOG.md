@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.32] - 2026-06-24
+
+### Added
+
+#### Claude Code 多账号源目录
+- 设置页「高级」新增 Claude Code 源账号目录配置,可添加额外账号根目录或 `projects` 子目录,例如 `/Users/bin/.claude-cc-bin`
+- Claude 项目/会话/消息/搜索/统计、用量上报、对话内容上报改为合并扫描默认 `~/.claude` 与额外源目录
+- 与 0.5.31 的 `(message.id, requestId)` token 去重规则合并,额外源目录统计/上报同样执行去重
+
 ## [0.5.31] - 2026-06-03
 
 ### Fixed
