@@ -339,6 +339,23 @@ pub fn set_upload_blocklist(blocklist: crate::blocklist::UploadBlocklist) -> Res
     crate::blocklist::save(&blocklist)
 }
 
+/// 读取额外 Claude Code 账号目录（账号根目录或 projects 目录）。
+#[tauri::command]
+pub fn get_scan_dirs() -> crate::scan_dirs::ScanDirs {
+    crate::scan_dirs::load()
+}
+
+/// 覆写额外 Claude Code 账号目录。保存后下次查询/上报重新读取。
+#[tauri::command]
+pub fn set_scan_dirs(
+    dirs: crate::scan_dirs::ScanDirs,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    crate::scan_dirs::save(&dirs)?;
+    state.invalidate_stats("claude");
+    Ok(())
+}
+
 /// 读取当前生效的身份信息：override / git / os fallback 全套。
 /// 前端用来显示"目前会上报为 X，来源是 git 配置"等提示。
 #[tauri::command]

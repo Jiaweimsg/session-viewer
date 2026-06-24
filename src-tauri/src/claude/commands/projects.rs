@@ -3,80 +3,101 @@ use std::io::{BufRead, BufReader};
 
 use crate::claude::models::project::Project;
 use crate::claude::models::session::SessionsIndex;
-use crate::claude::parser::path_encoder::{decode_project_path, get_projects_dir, short_name_from_path};
+use crate::claude::parser::path_encoder::{
+    decode_project_path, get_all_projects_dirs, short_name_from_path,
+};
 
 pub fn get_projects() -> Result<Vec<Project>, String> {
-    let projects_dir = get_projects_dir().ok_or("Could not find Claude projects directory")?;
+    use std::collections::HashMap;
 
-    if !projects_dir.exists() {
-        return Ok(Vec::new());
-    }
+    // 跨多个 home 合并:同一 encoded_name(= 同一 cwd 项目)可能同时出现在
+    // 默认 ~/.claude 和额外账号目录下,合并成一个条目、会话数累加。
+    let mut merged: HashMap<String, Project> = HashMap::new();
 
-    let mut projects: Vec<Project> = Vec::new();
-
-    let entries =
-        fs::read_dir(&projects_dir).map_err(|e| format!("Failed to read projects dir: {}", e))?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
+    for projects_dir in get_all_projects_dirs() {
+        if !projects_dir.exists() {
             continue;
         }
-
-        let encoded_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(name) => name.to_string(),
-            None => continue,
+        let entries = match fs::read_dir(&projects_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
         };
 
-        // Try to read the real cwd from session files first (most accurate),
-        // fall back to decoding the encoded directory name
-        let display_path = read_cwd_from_sessions(&path)
-            .unwrap_or_else(|| decode_project_path(&encoded_name));
-        let short_name = short_name_from_path(&display_path);
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
 
-        // Use sessions-index.json if available (consistent with get_sessions)
-        let session_count = {
-            let index_path = path.join("sessions-index.json");
-            if let Ok(content) = fs::read_to_string(&index_path) {
-                if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
-                    if !index.entries.is_empty() {
-                        index.entries.len()
+            let encoded_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+
+            // Try to read the real cwd from session files first (most accurate),
+            // fall back to decoding the encoded directory name
+            let display_path =
+                read_cwd_from_sessions(&path).unwrap_or_else(|| decode_project_path(&encoded_name));
+            let short_name = short_name_from_path(&display_path);
+
+            // Use sessions-index.json if available (consistent with get_sessions)
+            let session_count = {
+                let index_path = path.join("sessions-index.json");
+                if let Ok(content) = fs::read_to_string(&index_path) {
+                    if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
+                        if !index.entries.is_empty() {
+                            index.entries.len()
+                        } else {
+                            count_jsonl_files(&path)
+                        }
                     } else {
                         count_jsonl_files(&path)
                     }
                 } else {
                     count_jsonl_files(&path)
                 }
-            } else {
-                count_jsonl_files(&path)
+            };
+
+            // Get last modified time from the directory
+            let last_modified = fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .map(|t| {
+                    let duration = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                    chrono::DateTime::from_timestamp(duration.as_secs() as i64, 0)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_default()
+                });
+
+            if session_count == 0 {
+                continue;
             }
-        };
 
-        // Get last modified time from the directory
-        let last_modified = fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .ok()
-            .map(|t| {
-                let duration = t
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
-                chrono::DateTime::from_timestamp(duration.as_secs() as i64, 0)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_default()
-            });
-
-        if session_count > 0 {
-            projects.push(Project {
-                encoded_name,
-                display_path,
-                short_name,
-                session_count,
-                last_modified,
-            });
+            match merged.get_mut(&encoded_name) {
+                Some(existing) => {
+                    existing.session_count += session_count;
+                    if last_modified > existing.last_modified {
+                        existing.last_modified = last_modified;
+                    }
+                }
+                None => {
+                    merged.insert(
+                        encoded_name.clone(),
+                        Project {
+                            encoded_name,
+                            display_path,
+                            short_name,
+                            session_count,
+                            last_modified,
+                        },
+                    );
+                }
+            }
         }
     }
 
     // Sort by last modified time, most recent first
+    let mut projects: Vec<Project> = merged.into_values().collect();
     projects.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
 
     Ok(projects)

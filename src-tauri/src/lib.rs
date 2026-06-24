@@ -9,6 +9,7 @@ mod opencode;
 mod commands;
 mod report;
 mod conversation;
+mod scan_dirs;
 mod shared_models;
 mod state;
 mod version_check;
@@ -96,6 +97,8 @@ pub fn run() {
             commands::resume_session,
             commands::get_upload_blocklist,
             commands::set_upload_blocklist,
+            commands::get_scan_dirs,
+            commands::set_scan_dirs,
             commands::get_identity_view,
             commands::get_identity_override,
             commands::set_identity_override,

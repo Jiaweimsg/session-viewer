@@ -213,6 +213,18 @@ export async function setUploadBlocklist(blocklist: UploadBlocklist): Promise<vo
   return invoke<void>("set_upload_blocklist", { blocklist });
 }
 
+export interface ScanDirs {
+  paths: string[];
+}
+
+export async function getScanDirs(): Promise<ScanDirs> {
+  return invoke<ScanDirs>("get_scan_dirs");
+}
+
+export async function setScanDirs(dirs: ScanDirs): Promise<void> {
+  return invoke<void>("set_scan_dirs", { dirs });
+}
+
 export interface IdentityOverride {
   user_name?: string | null;
   user_email?: string | null;

@@ -213,26 +213,21 @@ pub fn scan_one_file(
     Ok(results)
 }
 
-/// Walk `~/.claude/projects/**/*.jsonl` and scan each incrementally.
+/// Walk every configured Claude `projects` directory and scan each jsonl incrementally.
 pub fn scan_all(state: &ConversationState) -> Vec<PendingMessage> {
-    let Some(projects_dir) = crate::claude::parser::path_encoder::get_projects_dir() else {
-        return Vec::new();
-    };
-    if !projects_dir.exists() {
-        return Vec::new();
-    }
-    let Ok(entries) = std::fs::read_dir(&projects_dir) else { return Vec::new() };
-
     let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let project_dir = entry.path();
-        if !project_dir.is_dir() {
+    for projects_dir in crate::claude::parser::path_encoder::get_all_projects_dirs() {
+        if !projects_dir.exists() {
             continue;
         }
-        let Ok(files) = std::fs::read_dir(&project_dir) else { continue };
-        for f in files.flatten() {
-            let p = f.path();
-            if p.extension().map(|e| e == "jsonl").unwrap_or(false) {
+        let Ok(entries) = std::fs::read_dir(&projects_dir) else { continue };
+
+        for entry in entries.flatten() {
+            let project_dir = entry.path();
+            if !project_dir.is_dir() {
+                continue;
+            }
+            for p in crate::claude::parser::path_encoder::list_session_jsonl_files(&project_dir) {
                 let start = state.offset_for(&p);
                 let Ok(meta) = std::fs::metadata(&p) else { continue };
                 let size = meta.len();

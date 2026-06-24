@@ -3,7 +3,9 @@ use serde::Serialize;
 use std::fs;
 
 use crate::claude::parser::jsonl::parse_all_messages;
-use crate::claude::parser::path_encoder::{decode_project_path, get_projects_dir, short_name_from_path};
+use crate::claude::parser::path_encoder::{
+    decode_project_path, get_all_projects_dirs, short_name_from_path,
+};
 use crate::shared_models::DisplayContentBlock;
 
 #[derive(Debug, Clone, Serialize)]
@@ -50,39 +52,40 @@ fn extract_context(text: &str, query_lower: &str, context_chars: usize) -> Strin
 }
 
 pub fn global_search(query: String, max_results: usize) -> Result<Vec<SearchResult>, String> {
-    let projects_dir = get_projects_dir().ok_or("Could not find Claude projects directory")?;
-
-    if !projects_dir.exists() {
-        return Ok(Vec::new());
-    }
-
     let query_lower = query.to_lowercase();
 
-    // Collect all JSONL file paths
+    // Collect all JSONL file paths across every configured Claude dir.
     let mut jsonl_files: Vec<(String, String, std::path::PathBuf)> = Vec::new();
 
-    let project_dirs = fs::read_dir(&projects_dir)
-        .map_err(|e| format!("Failed to read projects dir: {}", e))?;
-
-    for entry in project_dirs.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
+    for projects_dir in get_all_projects_dirs() {
+        if !projects_dir.exists() {
             continue;
         }
-
-        let encoded_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(name) => name.to_string(),
-            None => continue,
+        let project_dirs = match fs::read_dir(&projects_dir) {
+            Ok(d) => d,
+            Err(_) => continue,
         };
 
-        let display_path = decode_project_path(&encoded_name);
-        let project_name = short_name_from_path(&display_path);
+        for entry in project_dirs.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
 
-        if let Ok(files) = fs::read_dir(&path) {
-            for file_entry in files.flatten() {
-                let file_path = file_entry.path();
-                if file_path.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                    jsonl_files.push((encoded_name.clone(), project_name.clone(), file_path));
+            let encoded_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+
+            let display_path = decode_project_path(&encoded_name);
+            let project_name = short_name_from_path(&display_path);
+
+            if let Ok(files) = fs::read_dir(&path) {
+                for file_entry in files.flatten() {
+                    let file_path = file_entry.path();
+                    if file_path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+                        jsonl_files.push((encoded_name.clone(), project_name.clone(), file_path));
+                    }
                 }
             }
         }

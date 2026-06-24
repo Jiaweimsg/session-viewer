@@ -540,26 +540,94 @@ function BlocklistSection() {
 // ============ 高级（重置/排错） ============
 
 function AdvancedSection() {
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ kind: "ok" | "err" | "idle"; text?: string }>({
+  const [sourceDirs, setSourceDirs] = useState<string[]>([]);
+  const [draftDir, setDraftDir] = useState("");
+  const [sourceLoading, setSourceLoading] = useState(true);
+  const [sourceSave, setSourceSave] = useState<SaveState>({ kind: "idle" });
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetMsg, setResetMsg] = useState<{ kind: "ok" | "err" | "idle"; text?: string }>({
     kind: "idle",
   });
   const [confirming, setConfirming] = useState(false);
 
+  useEffect(() => {
+    api
+      .getScanDirs()
+      .then((dirs) => setSourceDirs(dirs.paths ?? []))
+      .catch((e: any) =>
+        setSourceSave({ kind: "err", msg: String(e?.message ?? e) })
+      )
+      .finally(() => setSourceLoading(false));
+  }, []);
+
+  const sourceReady = sourceSave.kind !== "saving" && !sourceLoading;
+
+  async function persistSourceDirs(next: string[]) {
+    setSourceSave({ kind: "saving" });
+    try {
+      await api.setScanDirs({ paths: next });
+      setSourceSave({ kind: "ok" });
+      setTimeout(
+        () => setSourceSave((s) => (s.kind === "ok" ? { kind: "idle" } : s)),
+        2000
+      );
+    } catch (e: any) {
+      setSourceSave({ kind: "err", msg: String(e?.message ?? e) });
+    }
+  }
+
+  function addSourceDir() {
+    const v = draftDir.trim();
+    if (!v) return;
+    if (sourceDirs.includes(v)) {
+      setDraftDir("");
+      return;
+    }
+    const next = [...sourceDirs, v];
+    setSourceDirs(next);
+    setDraftDir("");
+    persistSourceDirs(next);
+  }
+
+  async function pickSourceDir() {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "选择 Claude Code 源账号目录",
+      });
+      if (typeof selected === "string" && selected.trim()) {
+        const v = selected.trim();
+        if (sourceDirs.includes(v)) return;
+        const next = [...sourceDirs, v];
+        setSourceDirs(next);
+        persistSourceDirs(next);
+      }
+    } catch (e: any) {
+      setSourceSave({ kind: "err", msg: String(e?.message ?? e) });
+    }
+  }
+
+  function removeSourceDir(i: number) {
+    const next = sourceDirs.filter((_, idx) => idx !== i);
+    setSourceDirs(next);
+    persistSourceDirs(next);
+  }
+
   async function reset() {
-    setBusy(true);
-    setMsg({ kind: "idle" });
+    setResetBusy(true);
+    setResetMsg({ kind: "idle" });
     try {
       await api.resetConversationState();
-      setMsg({
+      setResetMsg({
         kind: "ok",
         text: "已重置。下一轮上报（≤5 分钟）会重新扫描并上传全部历史。",
       });
       setConfirming(false);
     } catch (e: any) {
-      setMsg({ kind: "err", text: String(e?.message ?? e) });
+      setResetMsg({ kind: "err", text: String(e?.message ?? e) });
     } finally {
-      setBusy(false);
+      setResetBusy(false);
     }
   }
 
@@ -570,50 +638,156 @@ function AdvancedSection() {
         <h2 className="text-base font-medium text-foreground">高级</h2>
       </header>
       <p className="text-sm text-muted-foreground mb-4">
-        排错用。当 dashboard 看不到对话内容、但用量正常时，重置上报状态可让客户端
-        重新扫描所有历史 jsonl 并重新上传。服务端按 uuid 去重，重复消息不会落盘。
+        配置 Claude Code 多账号源目录，并提供上报状态重置。
       </p>
-      <div className="flex items-center gap-2">
-        {confirming ? (
-          <>
-            <button
-              onClick={reset}
-              disabled={busy}
-              className="flex items-center gap-1.5 bg-destructive text-destructive-foreground text-sm font-medium rounded-md px-4 py-2 hover:bg-destructive/90 disabled:opacity-50 transition-colors"
-            >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              确认重置
-            </button>
-            <button
-              onClick={() => setConfirming(false)}
-              disabled={busy}
-              className="text-sm text-muted-foreground rounded-md px-3 py-2 border border-border hover:bg-accent transition-colors disabled:opacity-50"
-            >
-              取消
-            </button>
-          </>
-        ) : (
+
+      <div className="border-b border-border pb-5 mb-5">
+        <header className="flex items-center gap-2 mb-1">
+          <FolderOpen className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-medium text-foreground">Claude Code 源账号目录</h3>
+        </header>
+        <p className="text-sm text-muted-foreground mb-4">
+          默认扫描 <span className="font-mono text-foreground">~/.claude</span>。
+          多账号时可添加额外账号根目录，例如
+          <span className="font-mono text-foreground mx-1">/Users/bin/.claude-cc-bin</span>
+          ，也可直接添加其 <span className="font-mono text-foreground">projects</span> 子目录。
+        </p>
+
+        <div className="flex gap-2 mb-4">
+          <input
+            type="text"
+            value={draftDir}
+            onChange={(e) => setDraftDir(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addSourceDir();
+            }}
+            placeholder="/Users/bin/.claude-cc-bin"
+            className="flex-1 bg-muted text-foreground text-sm rounded-md px-3 py-2 border border-border focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+          />
           <button
-            onClick={() => setConfirming(true)}
-            className="flex items-center gap-1.5 text-sm text-foreground rounded-md px-4 py-2 border border-border hover:bg-accent transition-colors"
+            onClick={pickSourceDir}
+            disabled={!sourceReady}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground rounded-md px-3 py-2 border border-border hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="从文件夹选择器添加"
           >
-            <RefreshCw className="w-4 h-4" />
-            重置对话上报状态
+            <FolderOpen className="w-4 h-4" />
+            选择文件夹
           </button>
+          <button
+            onClick={addSourceDir}
+            disabled={!draftDir.trim() || !sourceReady}
+            className="flex items-center gap-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-md px-4 py-2 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            添加
+          </button>
+        </div>
+
+        {sourceLoading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            加载中…
+          </div>
+        ) : sourceDirs.length === 0 ? (
+          <div className="text-sm text-muted-foreground py-4 border border-dashed border-border rounded-md text-center">
+            暂无额外源目录。当前只扫描默认 ~/.claude。
+          </div>
+        ) : (
+          <ul className="space-y-1">
+            {sourceDirs.map((p, i) => (
+              <li
+                key={`${p}-${i}`}
+                className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-2 group"
+              >
+                <span className="font-mono text-sm text-foreground flex-1 truncate" title={p}>
+                  {p}
+                </span>
+                <button
+                  onClick={() => removeSourceDir(i)}
+                  disabled={!sourceReady}
+                  className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="移除"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
-        <div className="ml-auto h-5 text-xs flex items-center gap-1.5">
-          {msg.kind === "ok" && (
+
+        <div className="mt-4 h-5 text-xs flex items-center gap-1.5">
+          {sourceSave.kind === "saving" && (
+            <>
+              <Save className="w-3.5 h-3.5 animate-pulse text-muted-foreground" />
+              <span className="text-muted-foreground">保存中…</span>
+            </>
+          )}
+          {sourceSave.kind === "ok" && (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-500" />
+              <span className="text-emerald-500">已保存</span>
+            </>
+          )}
+          {sourceSave.kind === "err" && (
+            <>
+              <AlertCircle className="w-3.5 h-3.5 text-destructive" />
+              <span className="text-destructive">保存失败：{sourceSave.msg}</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <header className="flex items-center gap-2 mb-1">
+          <RefreshCw className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-medium text-foreground">对话上报状态</h3>
+        </header>
+        <p className="text-sm text-muted-foreground mb-4">
+          当 dashboard 看不到对话内容、但用量正常时，重置上报状态可让客户端
+          重新扫描所有历史 jsonl 并重新上传。服务端按 uuid 去重，重复消息不会落盘。
+        </p>
+        <div className="flex items-center gap-2">
+          {confirming ? (
+            <>
+              <button
+                onClick={reset}
+                disabled={resetBusy}
+                className="flex items-center gap-1.5 bg-destructive text-destructive-foreground text-sm font-medium rounded-md px-4 py-2 hover:bg-destructive/90 disabled:opacity-50 transition-colors"
+              >
+                {resetBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                确认重置
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                disabled={resetBusy}
+                className="text-sm text-muted-foreground rounded-md px-3 py-2 border border-border hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                取消
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirming(true)}
+              className="flex items-center gap-1.5 text-sm text-foreground rounded-md px-4 py-2 border border-border hover:bg-accent transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" />
+              重置对话上报状态
+            </button>
+          )}
+          <div className="ml-auto h-5 text-xs flex items-center gap-1.5">
+          {resetMsg.kind === "ok" && (
             <>
               <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-              <span className="text-emerald-500">{msg.text}</span>
+              <span className="text-emerald-500">{resetMsg.text}</span>
             </>
           )}
-          {msg.kind === "err" && (
+          {resetMsg.kind === "err" && (
             <>
               <AlertCircle className="w-3.5 h-3.5 text-destructive shrink-0" />
-              <span className="text-destructive">{msg.text}</span>
+              <span className="text-destructive">{resetMsg.text}</span>
             </>
           )}
+          </div>
         </div>
       </div>
     </section>

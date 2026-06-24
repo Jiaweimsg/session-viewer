@@ -5,38 +5,148 @@ use std::path::Path;
 
 use crate::claude::models::stats::{
     AdvancedStats, DailyActivity, DailyModelTokens, DailyTokenEntry, EfficiencyBucket,
-    ModelUsageEntry, ProjectTokenEntry, SessionEfficiency, StatsCache, ToolCallEntry,
-    TokenUsageSummary,
+    ModelUsageEntry, ProjectTokenEntry, SessionEfficiency, StatsCache, TokenUsageSummary,
+    ToolCallEntry,
 };
 use crate::claude::parser::path_encoder::{
-    get_projects_dir, get_stats_cache_path, list_session_jsonl_files, short_name_from_path,
+    get_all_projects_dirs, get_projects_dir, get_stats_cache_path, list_session_jsonl_files,
+    short_name_from_path,
 };
 
 pub fn get_global_stats() -> Result<StatsCache, String> {
     let path = get_stats_cache_path().ok_or("Could not find stats cache path")?;
 
-    // Cache file is owned by Claude Code itself and may be days/weeks stale.
-    // If usable, treat it as a baseline and merge in any JSONL records newer
-    // than `last_computed_date` so the current month is always covered.
-    if path.exists() {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(cached) = serde_json::from_str::<StatsCache>(&content) {
-                let cutoff = cached
-                    .last_computed_date
-                    .as_ref()
-                    .filter(|d| d.len() >= 10)
-                    .cloned();
-                if !cached.daily_activity.is_empty() {
-                    if let Some(cutoff_date) = cutoff {
-                        return merge_incremental(cached, cutoff_date);
+    // Default ~/.claude home: Claude Code owns stats-cache.json (may be days/weeks
+    // stale). If usable, treat it as a baseline and merge in JSONL records newer
+    // than `last_computed_date`; otherwise compute everything from JSONL.
+    let mut base = 'base: {
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(cached) = serde_json::from_str::<StatsCache>(&content) {
+                    let cutoff = cached
+                        .last_computed_date
+                        .as_ref()
+                        .filter(|d| d.len() >= 10)
+                        .cloned();
+                    if !cached.daily_activity.is_empty() {
+                        if let Some(cutoff_date) = cutoff {
+                            break 'base merge_incremental(cached, cutoff_date)?;
+                        }
                     }
                 }
             }
         }
-    }
+        // Fallback: cache missing/empty/unparseable — compute everything from JSONL.
+        compute_stats_from_sessions()?
+    };
 
-    // Fallback: cache missing/empty/unparseable — compute everything from JSONL.
-    compute_stats_from_sessions()
+    // Extra account dirs (multi-account config) have no Claude stats-cache —
+    // full-scan each and merge into the default-home baseline.
+    fold_extra_dirs(&mut base);
+
+    Ok(base)
+}
+
+/// Full-scan every *extra* projects dir (all but the default ~/.claude home,
+/// which `base` already covers) and merge its stats into `base`.
+fn fold_extra_dirs(base: &mut StatsCache) {
+    for projects_dir in get_all_projects_dirs().into_iter().skip(1) {
+        if !projects_dir.exists() {
+            continue;
+        }
+
+        let mut daily_stats: HashMap<String, (u64, u64, u64)> = HashMap::new();
+        let mut daily_model_tokens: HashMap<String, HashMap<String, u64>> = HashMap::new();
+        let mut model_usage: HashMap<String, ModelUsageEntry> = HashMap::new();
+
+        let entries = match fs::read_dir(&projects_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            for file_path in list_session_jsonl_files(&path) {
+                scan_session_for_stats(
+                    &file_path,
+                    &mut daily_stats,
+                    &mut daily_model_tokens,
+                    &mut model_usage,
+                );
+            }
+        }
+
+        merge_into_base(base, daily_stats, daily_model_tokens, model_usage);
+    }
+}
+
+/// Merge a freshly-scanned (daily, model_tokens, model_usage) delta into `base`.
+fn merge_into_base(
+    base: &mut StatsCache,
+    delta_daily: HashMap<String, (u64, u64, u64)>,
+    delta_model_tokens: HashMap<String, HashMap<String, u64>>,
+    delta_model_usage: HashMap<String, ModelUsageEntry>,
+) {
+    // daily_activity
+    let mut daily_map: HashMap<String, DailyActivity> = std::mem::take(&mut base.daily_activity)
+        .into_iter()
+        .map(|d| (d.date.clone(), d))
+        .collect();
+    for (date, (msgs, sessions, tools)) in delta_daily {
+        let entry = daily_map.entry(date.clone()).or_insert(DailyActivity {
+            date,
+            message_count: 0,
+            session_count: 0,
+            tool_call_count: 0,
+        });
+        entry.message_count += msgs;
+        entry.session_count += sessions;
+        entry.tool_call_count += tools;
+    }
+    let mut daily_activity: Vec<DailyActivity> = daily_map.into_values().collect();
+    daily_activity.sort_by(|a, b| a.date.cmp(&b.date));
+    base.daily_activity = daily_activity;
+
+    // daily_model_tokens
+    let mut dmt_map: HashMap<String, HashMap<String, u64>> =
+        std::mem::take(&mut base.daily_model_tokens)
+            .into_iter()
+            .map(|d| (d.date, d.tokens_by_model))
+            .collect();
+    for (date, tokens) in delta_model_tokens {
+        let entry = dmt_map.entry(date).or_default();
+        for (model, t) in tokens {
+            *entry.entry(model).or_insert(0) += t;
+        }
+    }
+    let mut dmt: Vec<DailyModelTokens> = dmt_map
+        .into_iter()
+        .map(|(date, tokens_by_model)| DailyModelTokens {
+            date,
+            tokens_by_model,
+        })
+        .collect();
+    dmt.sort_by(|a, b| a.date.cmp(&b.date));
+    base.daily_model_tokens = dmt;
+
+    // model_usage all-time totals
+    for (model, delta) in delta_model_usage {
+        let entry = base
+            .model_usage
+            .entry(model)
+            .or_insert_with(|| ModelUsageEntry {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+            });
+        entry.input_tokens += delta.input_tokens;
+        entry.output_tokens += delta.output_tokens;
+        entry.cache_read_input_tokens += delta.cache_read_input_tokens;
+        entry.cache_creation_input_tokens += delta.cache_creation_input_tokens;
+    }
 }
 
 /// Merge fresh JSONL records into a cached `StatsCache`.
@@ -71,8 +181,8 @@ fn merge_incremental(mut base: StatsCache, cutoff_date: String) -> Result<StatsC
     let mut delta_model_tokens: HashMap<String, HashMap<String, u64>> = HashMap::new();
     let mut delta_model_usage: HashMap<String, ModelUsageEntry> = HashMap::new();
 
-    let entries = fs::read_dir(&projects_dir)
-        .map_err(|e| format!("Failed to read projects dir: {}", e))?;
+    let entries =
+        fs::read_dir(&projects_dir).map_err(|e| format!("Failed to read projects dir: {}", e))?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -214,16 +324,13 @@ fn scan_session_incremental(
             continue;
         }
 
-        let date = v
-            .get("timestamp")
-            .and_then(|t| t.as_str())
-            .and_then(|ts| {
-                if ts.len() >= 10 {
-                    Some(ts[..10].to_string())
-                } else {
-                    None
-                }
-            });
+        let date = v.get("timestamp").and_then(|t| t.as_str()).and_then(|ts| {
+            if ts.len() >= 10 {
+                Some(ts[..10].to_string())
+            } else {
+                None
+            }
+        });
 
         let date = match date {
             Some(d) => d,
@@ -388,8 +495,8 @@ fn compute_stats_from_sessions() -> Result<StatsCache, String> {
     // model -> ModelUsageEntry
     let mut model_usage: HashMap<String, ModelUsageEntry> = HashMap::new();
 
-    let entries = fs::read_dir(&projects_dir)
-        .map_err(|e| format!("Failed to read projects dir: {}", e))?;
+    let entries =
+        fs::read_dir(&projects_dir).map_err(|e| format!("Failed to read projects dir: {}", e))?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -410,14 +517,12 @@ fn compute_stats_from_sessions() -> Result<StatsCache, String> {
     // Convert to sorted vectors
     let mut daily_activity: Vec<DailyActivity> = daily_stats
         .into_iter()
-        .map(
-            |(date, (messages, sessions, tool_calls))| DailyActivity {
-                date,
-                message_count: messages,
-                session_count: sessions,
-                tool_call_count: tool_calls,
-            },
-        )
+        .map(|(date, (messages, sessions, tool_calls))| DailyActivity {
+            date,
+            message_count: messages,
+            session_count: sessions,
+            tool_call_count: tool_calls,
+        })
         .collect();
     daily_activity.sort_by(|a, b| a.date.cmp(&b.date));
 
@@ -490,16 +595,13 @@ fn scan_session_for_stats(
         }
 
         // Extract date from timestamp
-        let date = v
-            .get("timestamp")
-            .and_then(|t| t.as_str())
-            .and_then(|ts| {
-                if ts.len() >= 10 {
-                    Some(ts[..10].to_string())
-                } else {
-                    None
-                }
-            });
+        let date = v.get("timestamp").and_then(|t| t.as_str()).and_then(|ts| {
+            if ts.len() >= 10 {
+                Some(ts[..10].to_string())
+            } else {
+                None
+            }
+        });
 
         let date = match date {
             Some(d) => d,
@@ -595,22 +697,6 @@ fn scan_session_for_stats(
 // ============ Advanced Stats ============
 
 pub fn get_advanced_stats() -> Result<AdvancedStats, String> {
-    let projects_dir = get_projects_dir().ok_or("Could not find Claude projects directory")?;
-
-    if !projects_dir.exists() {
-        return Ok(AdvancedStats {
-            project_token_ranking: Vec::new(),
-            tool_call_ranking: Vec::new(),
-            efficiency: SessionEfficiency {
-                avg_messages_per_session: 0.0,
-                avg_tokens_per_session: 0.0,
-                total_sessions: 0,
-                total_messages: 0,
-                distribution: Vec::new(),
-            },
-        });
-    }
-
     // project_name -> (total_tokens, input_tokens, output_tokens)
     let mut project_tokens: HashMap<String, (u64, u64, u64)> = HashMap::new();
     // tool_name -> call_count
@@ -619,34 +705,43 @@ pub fn get_advanced_stats() -> Result<AdvancedStats, String> {
     let mut session_msg_counts: Vec<u64> = Vec::new();
     let mut total_tokens_all: u64 = 0;
 
-    let entries = fs::read_dir(&projects_dir)
-        .map_err(|e| format!("Failed to read projects dir: {}", e))?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
+    for projects_dir in get_all_projects_dirs() {
+        if !projects_dir.exists() {
             continue;
         }
+        let entries = match fs::read_dir(&projects_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
 
-        let project_name = resolve_project_name(&path);
-
-        for file_path in list_session_jsonl_files(&path) {
-            let result = scan_session_advanced(&file_path);
-            // Accumulate project tokens
-            let proj = project_tokens.entry(project_name.clone()).or_insert((0, 0, 0));
-            proj.0 += result.total_tokens;
-            proj.1 += result.input_tokens;
-            proj.2 += result.output_tokens;
-            total_tokens_all += result.total_tokens;
-
-            // Accumulate tool calls
-            for (name, count) in &result.tool_calls {
-                *tool_calls.entry(name.clone()).or_insert(0) += count;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
             }
 
-            // Track session message count
-            if result.message_count > 0 {
-                session_msg_counts.push(result.message_count);
+            let project_name = resolve_project_name(&path);
+
+            for file_path in list_session_jsonl_files(&path) {
+                let result = scan_session_advanced(&file_path);
+                // Accumulate project tokens
+                let proj = project_tokens
+                    .entry(project_name.clone())
+                    .or_insert((0, 0, 0));
+                proj.0 += result.total_tokens;
+                proj.1 += result.input_tokens;
+                proj.2 += result.output_tokens;
+                total_tokens_all += result.total_tokens;
+
+                // Accumulate tool calls
+                for (name, count) in &result.tool_calls {
+                    *tool_calls.entry(name.clone()).or_insert(0) += count;
+                }
+
+                // Track session message count
+                if result.message_count > 0 {
+                    session_msg_counts.push(result.message_count);
+                }
             }
         }
     }
@@ -831,10 +926,22 @@ fn scan_session_advanced(path: &Path) -> SessionScanResult {
                 }
 
                 if let Some(usage) = msg.get("usage") {
-                    let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let cache_creation = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let input = usage
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let output = usage
+                        .get("output_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let cache_read = usage
+                        .get("cache_read_input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let cache_creation = usage
+                        .get("cache_creation_input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
 
                     result.input_tokens += input + cache_read + cache_creation;
                     result.output_tokens += output;
@@ -867,7 +974,10 @@ mod tests {
     }
 
     fn user_line(ts: &str) -> String {
-        format!(r#"{{"type":"user","timestamp":"{}","message":{{"role":"user","content":"hi"}}}}"#, ts)
+        format!(
+            r#"{{"type":"user","timestamp":"{}","message":{{"role":"user","content":"hi"}}}}"#,
+            ts
+        )
     }
 
     #[test]

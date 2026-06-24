@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::sync::mpsc;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::claude::parser::path_encoder::get_projects_dir;
+use crate::claude::parser::path_encoder::get_all_projects_dirs;
 use crate::codex::parser::session_scanner::get_sessions_dir;
 use crate::cursor::parser::cli_chats::get_chats_dir;
 use crate::cursor::parser::project_scanner::get_cursor_user_dir;
@@ -18,12 +18,12 @@ pub struct FsChangePayload {
 /// Start watching both Claude projects and Codex sessions directories for changes.
 /// Emits "fs-change" events to the frontend when files are modified.
 pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
-    let claude_dir = get_projects_dir();
+    let claude_dirs = get_all_projects_dirs();
     let codex_dir = get_sessions_dir();
     let cursor_dir = get_cursor_user_dir();
     let cursor_chats_dir = get_chats_dir();
 
-    if claude_dir.is_none()
+    if claude_dirs.is_empty()
         && codex_dir.is_none()
         && cursor_dir.is_none()
         && cursor_chats_dir.is_none()
@@ -42,11 +42,11 @@ pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
             }
         };
 
-        // Watch Claude projects directory if it exists
-        if let Some(ref dir) = claude_dir {
+        // Watch every configured Claude projects directory (default + extra accounts)
+        for dir in &claude_dirs {
             if dir.exists() {
                 if let Err(e) = watcher.watch(dir, RecursiveMode::Recursive) {
-                    eprintln!("Failed to watch Claude projects directory: {}", e);
+                    eprintln!("Failed to watch Claude projects directory {:?}: {}", dir, e);
                 }
             }
         }
@@ -88,7 +88,7 @@ pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
                         // Determine which tool the change belongs to
                         let tool = determine_tool(
                             &event.paths,
-                            &claude_dir,
+                            &claude_dirs,
                             &codex_dir,
                             &cursor_dir,
                             &cursor_chats_dir,
@@ -122,14 +122,14 @@ pub fn start_watcher(app_handle: AppHandle) -> Result<(), String> {
 /// Determine which tool a set of changed paths belongs to
 fn determine_tool(
     paths: &[std::path::PathBuf],
-    claude_dir: &Option<std::path::PathBuf>,
+    claude_dirs: &[std::path::PathBuf],
     codex_dir: &Option<std::path::PathBuf>,
     cursor_dir: &Option<std::path::PathBuf>,
     cursor_chats_dir: &Option<std::path::PathBuf>,
 ) -> String {
     for path in paths {
         let path_str = path.to_string_lossy();
-        if let Some(ref dir) = claude_dir {
+        for dir in claude_dirs {
             if path_str.starts_with(&dir.to_string_lossy().to_string()) {
                 return "claude".to_string();
             }

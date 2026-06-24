@@ -4,47 +4,53 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use crate::claude::parser::path_encoder::{
-    get_projects_dir, list_session_jsonl_files, short_name_from_path,
+    get_all_projects_dirs, list_session_jsonl_files, short_name_from_path,
 };
 use crate::report::UsageRecord;
 
 /// Scan all Claude sessions and aggregate usage by (date, project, model)
 pub fn collect_usage_records() -> Result<Vec<UsageRecord>, String> {
-    let projects_dir = get_projects_dir().ok_or("Could not find Claude projects directory")?;
-    if !projects_dir.exists() {
-        return Ok(Vec::new());
-    }
-
     type AggKey = (String, String, String);
     let mut agg: HashMap<AggKey, (u64, u64, u64, u64, u64, u64)> = HashMap::new();
     let mut session_tracker: HashMap<(String, String), std::collections::HashSet<String>> =
         HashMap::new();
 
-    let entries = fs::read_dir(&projects_dir)
-        .map_err(|e| format!("Failed to read projects dir: {}", e))?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
+    for projects_dir in get_all_projects_dirs() {
+        if !projects_dir.exists() {
             continue;
         }
 
-        let project_name = resolve_project_name(&path);
+        let entries = match fs::read_dir(&projects_dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                eprintln!("Failed to read Claude projects dir {:?}: {}", projects_dir, e);
+                continue;
+            }
+        };
 
-        for file_path in list_session_jsonl_files(&path) {
-            let session_id = file_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unknown")
-                .to_string();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
 
-            scan_session_for_report(
-                &file_path,
-                &project_name,
-                &session_id,
-                &mut agg,
-                &mut session_tracker,
-            );
+            let project_name = resolve_project_name(&path);
+
+            for file_path in list_session_jsonl_files(&path) {
+                let session_id = file_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                scan_session_for_report(
+                    &file_path,
+                    &project_name,
+                    &session_id,
+                    &mut agg,
+                    &mut session_tracker,
+                );
+            }
         }
     }
 

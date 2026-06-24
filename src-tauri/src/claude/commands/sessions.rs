@@ -4,20 +4,38 @@ use std::path::{Path, PathBuf};
 
 use crate::claude::models::session::{SessionIndexEntry, SessionsIndex};
 use crate::claude::parser::jsonl::{extract_first_prompt, extract_session_metadata};
-use crate::claude::parser::path_encoder::get_projects_dir;
+use crate::claude::parser::path_encoder::get_all_projects_dirs;
 
 pub fn get_sessions(encoded_name: String) -> Result<Vec<SessionIndexEntry>, String> {
-    let projects_dir = get_projects_dir().ok_or("Could not find Claude projects directory")?;
-    let project_dir = projects_dir.join(&encoded_name);
+    // 同一 encoded_name 可能存在于默认 ~/.claude 和额外账号目录;跨 home 汇总
+    // 全部会话。session_id 是 UUID,全局唯一,不会冲突。
+    let mut all: Vec<SessionIndexEntry> = Vec::new();
+    let mut found_any = false;
 
-    if !project_dir.exists() {
+    for projects_dir in get_all_projects_dirs() {
+        let project_dir = projects_dir.join(&encoded_name);
+        if !project_dir.exists() {
+            continue;
+        }
+        found_any = true;
+        all.extend(collect_sessions_from(&project_dir));
+    }
+
+    if !found_any {
         return Err(format!("Project directory not found: {}", encoded_name));
     }
 
+    all.sort_by(|a, b| b.modified.cmp(&a.modified));
+    Ok(all)
+}
+
+/// Collect session entries from a single project dir (sessions-index.json +
+/// on-disk .jsonl merge), unsorted. The caller merges across dirs and sorts.
+fn collect_sessions_from(project_dir: &Path) -> Vec<SessionIndexEntry> {
     // Collect all .jsonl files on disk: session_id -> path
     let mut disk_sessions: std::collections::HashMap<String, PathBuf> =
         std::collections::HashMap::new();
-    if let Ok(dir_entries) = fs::read_dir(&project_dir) {
+    if let Ok(dir_entries) = fs::read_dir(project_dir) {
         for entry in dir_entries.flatten() {
             let path = entry.path();
             if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
@@ -63,8 +81,7 @@ pub fn get_sessions(encoded_name: String) -> Result<Vec<SessionIndexEntry>, Stri
                         }
                     }
 
-                    entries.sort_by(|a, b| b.modified.cmp(&a.modified));
-                    return Ok(entries);
+                    return entries;
                 }
             }
         }
@@ -78,8 +95,7 @@ pub fn get_sessions(encoded_name: String) -> Result<Vec<SessionIndexEntry>, Stri
         }
     }
 
-    entries.sort_by(|a, b| b.modified.cmp(&a.modified));
-    Ok(entries)
+    entries
 }
 
 /// Scan a single .jsonl file and produce a SessionIndexEntry
@@ -94,9 +110,7 @@ fn scan_single_session(path: &Path, session_id: &str) -> Option<SessionIndexEntr
     let file_meta = fs::metadata(path).ok();
     let modified = file_meta.as_ref().and_then(|m| {
         m.modified().ok().map(|t| {
-            let d = t
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
+            let d = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
             chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
                 .map(|dt| dt.to_rfc3339())
                 .unwrap_or_default()
@@ -105,9 +119,7 @@ fn scan_single_session(path: &Path, session_id: &str) -> Option<SessionIndexEntr
 
     let created = file_meta.as_ref().and_then(|m| {
         m.created().ok().map(|t| {
-            let d = t
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
+            let d = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
             chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
                 .map(|dt| dt.to_rfc3339())
                 .unwrap_or_default()
@@ -131,7 +143,11 @@ fn scan_single_session(path: &Path, session_id: &str) -> Option<SessionIndexEntr
         git_branch,
         project_path,
         is_sidechain: Some(false),
-        models: if models.is_empty() { None } else { Some(models) },
+        models: if models.is_empty() {
+            None
+        } else {
+            Some(models)
+        },
     })
 }
 
