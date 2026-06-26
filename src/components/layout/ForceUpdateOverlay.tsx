@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
+import { checkForUpdate, installUpdate } from "../../services/updater";
 
 interface ForceUpdatePayload {
   current: string;
@@ -9,18 +10,24 @@ interface ForceUpdatePayload {
 
 const RELEASES_URL = "https://github.com/Jiaweimsg/session-viewer/releases";
 
+type Status =
+  | { kind: "prompt" }
+  | { kind: "checking" }
+  | { kind: "downloading"; fraction: number | null }
+  | { kind: "error"; message: string };
+
 export function ForceUpdateOverlay() {
   const [info, setInfo] = useState<ForceUpdatePayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status>({ kind: "prompt" });
 
   useEffect(() => {
     const unlistenBlock = listen<ForceUpdatePayload>("force-update", (e) => {
       setInfo(e.payload);
-      setError(null);
+      setStatus({ kind: "prompt" });
     });
     const unlistenClear = listen("force-update-cleared", () => {
       setInfo(null);
-      setError(null);
+      setStatus({ kind: "prompt" });
     });
     return () => {
       unlistenBlock.then((fn) => fn()).catch(() => {});
@@ -30,14 +37,45 @@ export function ForceUpdateOverlay() {
 
   if (!info) return null;
 
-  const handleUpdate = async () => {
-    setError(null);
+  const openReleases = async () => {
     try {
       await open(RELEASES_URL);
     } catch (e) {
-      setError(`打开浏览器失败：${e}。请手动访问 ${RELEASES_URL}`);
+      setStatus({
+        kind: "error",
+        message: `打开浏览器失败：${e}。请手动访问 ${RELEASES_URL}`,
+      });
     }
   };
+
+  // 应用内自动更新：检查 → 下载安装 → 重启。任何失败都退回手动下载。
+  const handleUpdate = async () => {
+    setStatus({ kind: "checking" });
+    try {
+      const update = await checkForUpdate();
+      if (!update) {
+        // 服务端抬高了最低版本，但发布渠道暂无更高版本的更新包 —— 退回手动下载。
+        setStatus({
+          kind: "error",
+          message: "暂无可用的更新包，请前往 GitHub 手动下载安装最新版本。",
+        });
+        await openReleases();
+        return;
+      }
+      setStatus({ kind: "downloading", fraction: 0 });
+      // 安装完成后会自动重启，正常不会返回到这里。
+      await installUpdate(update, (p) => {
+        setStatus({ kind: "downloading", fraction: p.fraction });
+      });
+    } catch (e) {
+      setStatus({
+        kind: "error",
+        message: `${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  };
+
+  const busy = status.kind === "checking" || status.kind === "downloading";
 
   return (
     <div
@@ -87,25 +125,65 @@ export function ForceUpdateOverlay() {
           session-viewer v{info.current} → v{info.min_required}
         </div>
 
-        <button
-          onClick={handleUpdate}
-          style={{
-            width: "100%",
-            padding: "12px",
-            fontSize: "14px",
-            fontWeight: 600,
-            background: "#6c5ce7",
-            color: "#fff",
-            border: "none",
-            borderRadius: "8px",
-            cursor: "pointer",
-            transition: "background 0.2s",
-          }}
-        >
-          立即更新
-        </button>
+        {status.kind === "downloading" ? (
+          <div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "12px",
+                color: "#666",
+                marginBottom: "6px",
+              }}
+            >
+              <span>正在下载并安装…</span>
+              {status.fraction != null && <span>{Math.round(status.fraction * 100)}%</span>}
+            </div>
+            <div
+              style={{
+                height: "6px",
+                width: "100%",
+                background: "#eee",
+                borderRadius: "999px",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  background: "#6c5ce7",
+                  borderRadius: "999px",
+                  width: status.fraction != null ? `${status.fraction * 100}%` : "33%",
+                  transition: "width 0.2s",
+                }}
+              />
+            </div>
+            <p style={{ fontSize: "12px", color: "#999", marginTop: "10px", lineHeight: 1.5 }}>
+              更新完成后将自动重启，请勿手动关闭应用。
+            </p>
+          </div>
+        ) : (
+          <button
+            onClick={handleUpdate}
+            disabled={busy}
+            style={{
+              width: "100%",
+              padding: "12px",
+              fontSize: "14px",
+              fontWeight: 600,
+              background: busy ? "#a29bfe" : "#6c5ce7",
+              color: "#fff",
+              border: "none",
+              borderRadius: "8px",
+              cursor: busy ? "default" : "pointer",
+              transition: "background 0.2s",
+            }}
+          >
+            {status.kind === "checking" ? "检查中…" : "立即更新"}
+          </button>
+        )}
 
-        {error && (
+        {status.kind === "error" && (
           <div
             style={{
               marginTop: "12px",
@@ -120,7 +198,22 @@ export function ForceUpdateOverlay() {
               wordBreak: "break-all",
             }}
           >
-            {error}
+            <div style={{ marginBottom: "8px" }}>更新失败：{status.message}</div>
+            <button
+              onClick={openReleases}
+              style={{
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#6c5ce7",
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                textDecoration: "underline",
+              }}
+            >
+              前往 GitHub 手动下载
+            </button>
           </div>
         )}
       </div>

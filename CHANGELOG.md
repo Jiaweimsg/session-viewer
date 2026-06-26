@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.33] - 2026-06-26
+
+### Added
+
+#### 应用内自动更新（替代跳转 GitHub）
+- 接入 `tauri-plugin-updater` + `tauri-plugin-process`，更新源为 GitHub Release 的 `latest.json`（`createUpdaterArtifacts: true`，minisign 签名校验）
+- 新增 `src/services/updater.ts` 封装 `check()` / `downloadAndInstall(onProgress)` / `relaunch()`，两处更新点共用
+- 设置页「关于 → 检查更新」：检查到新版本后直接应用内下载安装（带进度条）并自动重启，下载/签名失败时退回 GitHub 手动下载
+- 服务端下发的「强制更新」遮罩：「立即更新」改为应用内下载安装并重启，失败兜底跳 GitHub
+- `.github/workflows/release.yml` 注入 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，发布时自动签名并上传 `latest.json`
+
 ## [0.5.32] - 2026-06-24
 
 ### Added

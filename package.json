@@ -1,7 +1,7 @@
 {
   "name": "session-viewer",
   "private": true,
-  "version": "0.5.32",
+  "version": "0.5.33",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,7 +15,9 @@
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-dialog": "^2.7.0",
+    "@tauri-apps/plugin-process": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.0.0",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.460.0",
     "react": "^19.0.0",

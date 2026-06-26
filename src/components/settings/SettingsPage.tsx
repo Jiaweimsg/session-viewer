@@ -15,10 +15,12 @@ import {
   RefreshCw,
   Info,
   Github,
+  Download,
 } from "lucide-react";
 import pkg from "../../../package.json";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import * as api from "../../services/tauriApi";
+import { checkForUpdate, installUpdate, type Update } from "../../services/updater";
 
 type SaveState =
   | { kind: "idle" }
@@ -796,14 +798,18 @@ function AdvancedSection() {
 
 // ============ 关于 ============
 
+const RELEASES_URL = "https://github.com/Jiaweimsg/session-viewer/releases";
+
+type UpdateState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "latest" }
+  | { kind: "available"; version: string; notes?: string; update: Update }
+  | { kind: "downloading"; version: string; fraction: number | null }
+  | { kind: "error"; message: string };
+
 function AboutSection() {
-  const [checking, setChecking] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<{
-    hasUpdate: boolean;
-    latestVersion?: string;
-    url?: string;
-    error?: string;
-  } | null>(null);
+  const [state, setState] = useState<UpdateState>({ kind: "idle" });
 
   const openLink = async (url: string) => {
     try {
@@ -815,35 +821,38 @@ function AboutSection() {
     }
   };
 
-  const checkForUpdates = async () => {
-    setChecking(true);
-    setUpdateInfo(null);
+  const handleCheck = async () => {
+    setState({ kind: "checking" });
     try {
-      const res = await fetch("https://api.github.com/repos/Jiaweimsg/session-viewer/releases/latest");
-      if (!res.ok) {
-        throw new Error("网络请求失败");
-      }
-      const data = await res.json();
-      const latestTag = data.tag_name;
-      const htmlUrl = data.html_url;
-
-      const current = `v${pkg.version}`;
-      let latest = latestTag;
-      if (!latest.startsWith('v')) {
-        latest = `v${latest}`;
-      }
-
-      if (latest !== current) {
-        setUpdateInfo({ hasUpdate: true, latestVersion: latest, url: htmlUrl });
+      const update = await checkForUpdate();
+      if (update) {
+        setState({
+          kind: "available",
+          version: update.version,
+          notes: update.body || undefined,
+          update,
+        });
       } else {
-        setUpdateInfo({ hasUpdate: false });
+        setState({ kind: "latest" });
       }
     } catch (e: any) {
-      setUpdateInfo({ hasUpdate: false, error: e.message || "检查失败" });
-    } finally {
-      setChecking(false);
+      setState({ kind: "error", message: e?.message || String(e) || "检查失败" });
     }
   };
+
+  const handleInstall = async (update: Update, version: string) => {
+    setState({ kind: "downloading", version, fraction: 0 });
+    try {
+      // 安装完成后会自动重启，正常不会返回到这里
+      await installUpdate(update, (p) => {
+        setState({ kind: "downloading", version, fraction: p.fraction });
+      });
+    } catch (e: any) {
+      setState({ kind: "error", message: e?.message || String(e) || "更新失败" });
+    }
+  };
+
+  const busy = state.kind === "checking" || state.kind === "downloading";
 
   return (
     <section className="bg-card border border-border rounded-lg p-5">
@@ -857,39 +866,91 @@ function AboutSection() {
           <div className="flex items-center gap-3">
             <span className="font-mono text-foreground font-medium">v{pkg.version}</span>
             <button
-              onClick={checkForUpdates}
-              disabled={checking}
+              onClick={handleCheck}
+              disabled={busy}
               className="flex items-center gap-1.5 text-xs bg-muted text-foreground px-2 py-1 rounded hover:bg-accent transition-colors disabled:opacity-50"
             >
-              {checking ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-              {checking ? "检查中..." : "检查更新"}
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              {state.kind === "checking"
+                ? "检查中..."
+                : state.kind === "downloading"
+                  ? "更新中..."
+                  : "检查更新"}
             </button>
           </div>
         </div>
 
-        {updateInfo && (
+        {state.kind === "error" && (
           <div className="py-2 border-b border-border/50">
-            {updateInfo.error ? (
-              <span className="text-destructive text-xs flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                检查失败: {updateInfo.error}
+            <div className="flex items-center justify-between bg-destructive/10 text-destructive px-3 py-2 rounded-md gap-3">
+              <span className="text-xs flex items-center gap-1 min-w-0">
+                <AlertCircle className="w-3 h-3 shrink-0" />
+                <span className="truncate">更新失败: {state.message}</span>
               </span>
-            ) : updateInfo.hasUpdate ? (
-              <div className="flex items-center justify-between bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-2 rounded-md">
-                <span className="text-xs">发现新版本: {updateInfo.latestVersion}</span>
-                <button
-                  onClick={() => openLink(updateInfo.url!)}
-                  className="text-xs font-medium underline hover:text-emerald-500"
-                >
-                  前往下载
-                </button>
-              </div>
-            ) : (
-              <span className="text-muted-foreground text-xs flex items-center gap-1">
-                <Check className="w-3 h-3" />
-                当前已是最新版本
-              </span>
+              <button
+                onClick={() => openLink(RELEASES_URL)}
+                className="text-xs font-medium underline hover:opacity-80 shrink-0"
+              >
+                手动下载
+              </button>
+            </div>
+          </div>
+        )}
+
+        {state.kind === "latest" && (
+          <div className="py-2 border-b border-border/50">
+            <span className="text-muted-foreground text-xs flex items-center gap-1">
+              <Check className="w-3 h-3" />
+              当前已是最新版本
+            </span>
+          </div>
+        )}
+
+        {state.kind === "available" && (
+          <div className="py-2 border-b border-border/50">
+            <div className="flex items-center justify-between bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-2 rounded-md gap-3">
+              <span className="text-xs">发现新版本: v{state.version}</span>
+              <button
+                onClick={() => handleInstall(state.update, state.version)}
+                className="flex items-center gap-1.5 text-xs font-medium bg-emerald-500 text-white px-2.5 py-1 rounded hover:bg-emerald-600 transition-colors"
+              >
+                <Download className="w-3 h-3" />
+                下载并安装
+              </button>
+            </div>
+            {state.notes && (
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground whitespace-pre-line max-h-24 overflow-y-auto">
+                {state.notes}
+              </p>
             )}
+          </div>
+        )}
+
+        {state.kind === "downloading" && (
+          <div className="py-2 border-b border-border/50">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs text-muted-foreground">
+                正在下载 v{state.version}…
+              </span>
+              {state.fraction != null && (
+                <span className="text-xs font-mono text-muted-foreground">
+                  {Math.round(state.fraction * 100)}%
+                </span>
+              )}
+            </div>
+            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+              <div
+                className={
+                  state.fraction != null
+                    ? "h-full bg-emerald-500 transition-[width] duration-200"
+                    : "h-full bg-emerald-500 animate-pulse w-1/3"
+                }
+                style={state.fraction != null ? { width: `${state.fraction * 100}%` } : undefined}
+              />
+            </div>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              下载完成后将自动安装并重启应用，请勿手动关闭。
+            </p>
           </div>
         )}
 
