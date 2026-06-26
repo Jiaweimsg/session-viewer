@@ -43,7 +43,7 @@
       "endpoints": [
         "https://github.com/Jiaweimsg/session-viewer/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyM0Y5NjE2OEM2ODA1NEMKUldSTUJXaU1GcFkva2pieldEa0VWK2JzMDZLWnUyVi91SURWamcwMW9iVG1tbzN5ckx2bUZYOUIK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlDNDRGNkNDRUEzQ0ExN0MKUldSOG9UenF6UFpFbkFUUFdhSW9IRjJoN2FCNW1DQVdIN1owUlU0SVM5ZlluSW5UNnJLSE0rSkYK",
       "windows": {
         "installMode": "passive"
       }
